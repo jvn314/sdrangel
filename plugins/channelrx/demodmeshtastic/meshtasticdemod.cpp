@@ -597,6 +597,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     rf["signal_db"]       = msg.getSingalDb();
     rf["noise_db"]        = msg.getNoiseDb();
     rf["snr_db"]          = msg.getSingalDb() - msg.getNoiseDb();
+	rf["cfo_hz"]          = msg.getCfoHz();
+    rf["sfo_ppm"]         = msg.getSfoPpm();
     root["rf"] = rf;
 
     // LoRa
@@ -624,8 +626,11 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["packet_length"] = static_cast<int>(msg.getPacketSize());
     lora["nb_symbols"]    = static_cast<int>(msg.getNbSymbols());
     lora["nb_codewords"]  = static_cast<int>(msg.getNbCodewords());
-    lora["payload_hex"]   = QString(msg.getBytes().left(
-        static_cast<int>(msg.getPacketSize())).toHex());
+	lora["fft_margin_min_db"] = msg.getFftMarginMinDb();
+    lora["fft_margin_avg_db"] = msg.getFftMarginAvgDb();
+    lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
+    lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
+    lora["payload_hex"]   = QString(msg.getBytes().left(static_cast<int>(msg.getPacketSize())).toHex());
     root["lora"] = lora;
 
     // Meshtastic section — only for sync word 0x2B
