@@ -774,18 +774,24 @@ void MeshtasticDemodSink::finalizeLoRaFrame()
     m_decodeMsg->setSignalDb(CalcDb::dbPower(m_magsqOnAvg.asDouble() / (1 << m_settings.m_spreadFactor)));
     m_decodeMsg->setNoiseDb(CalcDb::dbPower(m_magsqOffAvg.asDouble() / (1 << m_settings.m_spreadFactor)));
 
-	const float cfoHz =
-    	(static_cast<float>(m_loRaCFOInt) + m_loRaCFOFrac)
-    	* static_cast<float>(m_bandwidth)
-    	/ static_cast<float>(m_nbSymbols);
+    float cfoHz = 0.0f;
+    float sfoPpm = 0.0f;
 
-	const float sfoPpm =
-    	m_loRaSFOHat
-    	/ static_cast<float>(m_nbSymbols)
-    	* 1.0e6f;
+    if (m_nbSymbols > 0U)
+    {
+        cfoHz =
+            (static_cast<float>(m_loRaCFOInt) + m_loRaCFOFrac)
+            * static_cast<float>(m_bandwidth)
+            / static_cast<float>(m_nbSymbols);
 
-	m_decodeMsg->setCfoHz(cfoHz);
-	m_decodeMsg->setSfoPpm(sfoPpm);
+        sfoPpm =
+            m_loRaSFOHat
+            / static_cast<float>(m_nbSymbols)
+            * 1.0e6f;
+    }
+
+    m_decodeMsg->setCfoHz(cfoHz);
+    m_decodeMsg->setSfoPpm(sfoPpm);
 
     if (m_decoderMsgQueue && m_settings.m_decodeActive) {
         m_decoderMsgQueue->push(m_decodeMsg);
