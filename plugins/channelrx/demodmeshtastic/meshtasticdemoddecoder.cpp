@@ -180,12 +180,70 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         MeshtasticDemodMsg::MsgDecodeSymbols& msg = (MeshtasticDemodMsg::MsgDecodeSymbols&) cmd;
         float msgSignalDb = msg.getSingalDb();
         float msgNoiseDb = msg.getNoiseDb();
+		float msgCfoHz = msg.getCfoHz();
+		float msgSfoPpm = msg.getSfoPpm();
         unsigned int msgSyncWord = msg.getSyncWord();
         QDateTime dt = QDateTime::currentDateTime();
         QString msgTimestamp = dt.toString(Qt::ISODateWithMs);
 
         QByteArray msgBytes;
         const std::vector<std::vector<float>>& msgMags = msg.getMagnitudes();
+
+        float fftMarginMinDb = 0.0f;
+        double fftMarginSumDb = 0.0;
+        unsigned int fftMarginCount = 0U;
+        unsigned int fftMarginLt1Db = 0U;
+        unsigned int fftMarginLt3Db = 0U;
+
+        for (const std::vector<float>& mags : msgMags)
+        {
+            if (mags.size() < 2U) {
+                continue;
+            }
+
+            float best = 0.0f;
+            float secondBest = 0.0f;
+
+            for (float mag : mags)
+            {
+                if (mag > best)
+                {
+                    secondBest = best;
+                    best = mag;
+                }
+                else if (mag > secondBest)
+                {
+                    secondBest = mag;
+                }
+            }
+
+            if (best <= 0.0f) {
+                continue;
+            }
+
+            const float marginDb =
+                10.0f * std::log10(best / std::max(secondBest, 1.0e-30f));
+
+            if ((fftMarginCount == 0U) || (marginDb < fftMarginMinDb)) {
+                fftMarginMinDb = marginDb;
+            }
+
+            fftMarginSumDb += marginDb;
+            fftMarginCount++;
+
+            if (marginDb < 1.0f) {
+                fftMarginLt1Db++;
+            }
+
+            if (marginDb < 3.0f) {
+                fftMarginLt3Db++;
+            }
+        }
+
+        const float fftMarginAvgDb =
+            fftMarginCount > 0U
+                ? static_cast<float>(fftMarginSumDb / fftMarginCount)
+                : 0.0f;		
         const bool canSoftDecode = !msgMags.empty()
             && (msgMags.size() >= msg.getSymbols().size())
             && (m_spreadFactor >= 5U)
@@ -362,6 +420,12 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setSyncWord(msgSyncWord);
             outputMsg->setSignalDb(msgSignalDb);
             outputMsg->setNoiseDb(msgNoiseDb);
+            outputMsg->setCfoHz(msgCfoHz);
+            outputMsg->setSfoPpm(msgSfoPpm);
+            outputMsg->setFftMarginMinDb(fftMarginMinDb);
+            outputMsg->setFftMarginAvgDb(fftMarginAvgDb);
+            outputMsg->setFftMarginLt1Db(fftMarginLt1Db);
+            outputMsg->setFftMarginLt3Db(fftMarginLt3Db);			
             outputMsg->setMsgTimestamp(msgTimestamp);
             outputMsg->setPacketSize(getPacketLength());
             outputMsg->setNbParityBits(getNbParityBits());
