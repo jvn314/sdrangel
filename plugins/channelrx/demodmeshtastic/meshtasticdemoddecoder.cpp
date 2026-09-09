@@ -180,8 +180,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         MeshtasticDemodMsg::MsgDecodeSymbols& msg = (MeshtasticDemodMsg::MsgDecodeSymbols&) cmd;
         float msgSignalDb = msg.getSingalDb();
         float msgNoiseDb = msg.getNoiseDb();
-		float msgCfoHz = msg.getCfoHz();
-		float msgSfoPpm = msg.getSfoPpm();
+        float msgCfoHz = msg.getCfoHz();
+        float msgSfoPpm = msg.getSfoPpm();
         unsigned int msgSyncWord = msg.getSyncWord();
         QDateTime dt = QDateTime::currentDateTime();
         QString msgTimestamp = dt.toString(Qt::ISODateWithMs);
@@ -243,7 +243,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         const float fftMarginAvgDb =
             fftMarginCount > 0U
                 ? static_cast<float>(fftMarginSumDb / fftMarginCount)
-                : 0.0f;		
+                : 0.0f;
         const bool canSoftDecode = !msgMags.empty()
             && (msgMags.size() >= msg.getSymbols().size())
             && (m_spreadFactor >= 5U)
@@ -425,7 +425,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setFftMarginMinDb(fftMarginMinDb);
             outputMsg->setFftMarginAvgDb(fftMarginAvgDb);
             outputMsg->setFftMarginLt1Db(fftMarginLt1Db);
-            outputMsg->setFftMarginLt3Db(fftMarginLt3Db);			
+            outputMsg->setFftMarginLt3Db(fftMarginLt3Db);
             outputMsg->setMsgTimestamp(msgTimestamp);
             outputMsg->setPacketSize(getPacketLength());
             outputMsg->setNbParityBits(getNbParityBits());
@@ -450,12 +450,12 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
 void MeshtasticDemodDecoder::handleInputMessages()
 {
-	Message* message;
+    Message* message;
 
-	while ((message = m_inputMessageQueue.pop()) != nullptr)
-	{
-		if (handleMessage(*message)) {
-			delete message;
-		}
-	}
+    while ((message = m_inputMessageQueue.pop()) != nullptr)
+    {
+        if (handleMessage(*message)) {
+            delete message;
+        }
+    }
 }
