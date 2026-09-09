@@ -274,6 +274,12 @@ namespace MeshtasticDemodMsg
         unsigned int getSyncWord() const { return m_syncWord; }
         float getSingalDb() const { return m_signalDb; }
         float getNoiseDb() const { return m_noiseDb; }
+        float getCfoHz() const { return m_cfoHz; }
+        float getSfoPpm() const { return m_sfoPpm; }
+        float getFftMarginMinDb() const { return m_fftMarginMinDb; }
+        float getFftMarginAvgDb() const { return m_fftMarginAvgDb; }
+        unsigned int getFftMarginLt1Db() const { return m_fftMarginLt1Db; }
+        unsigned int getFftMarginLt3Db() const { return m_fftMarginLt3Db; }
         const QString& getMsgTimestamp() const { return m_msgTimestamp; }
         unsigned int getPacketSize() const { return m_packetSize; }
         unsigned int getNbParityBits() const { return m_nbParityBits; }
@@ -304,6 +310,24 @@ namespace MeshtasticDemodMsg
         }
         void setNoiseDb(float db) {
             m_noiseDb = db;
+        }
+        void setCfoHz(float cfoHz) {
+            m_cfoHz = cfoHz;
+        }
+        void setSfoPpm(float sfoPpm) {
+            m_sfoPpm = sfoPpm;
+        }
+        void setFftMarginMinDb(float marginDb) {
+            m_fftMarginMinDb = marginDb;
+        }
+        void setFftMarginAvgDb(float marginDb) {
+            m_fftMarginAvgDb = marginDb;
+        }
+        void setFftMarginLt1Db(unsigned int count) {
+            m_fftMarginLt1Db = count;
+        }
+        void setFftMarginLt3Db(unsigned int count) {
+            m_fftMarginLt3Db = count;
         }
         void setMsgTimestamp(const QString& ts) {
             m_msgTimestamp = ts;
@@ -353,6 +377,12 @@ namespace MeshtasticDemodMsg
         unsigned int m_syncWord;
         float m_signalDb;
         float m_noiseDb;
+        float m_cfoHz;
+        float m_sfoPpm;
+        float m_fftMarginMinDb;
+        float m_fftMarginAvgDb;
+        unsigned int m_fftMarginLt1Db;
+        unsigned int m_fftMarginLt3Db;
         QString m_msgTimestamp;
         unsigned int m_packetSize;
         unsigned int m_nbParityBits;
@@ -376,6 +406,12 @@ namespace MeshtasticDemodMsg
             m_syncWord(0),
             m_signalDb(0.0),
             m_noiseDb(0.0),
+            m_cfoHz(0.0),
+            m_sfoPpm(0.0),
+            m_fftMarginMinDb(0.0),
+            m_fftMarginAvgDb(0.0),
+            m_fftMarginLt1Db(0),
+            m_fftMarginLt3Db(0),
             m_packetSize(0),
             m_nbParityBits(0),
             m_nbSymbols(0),
