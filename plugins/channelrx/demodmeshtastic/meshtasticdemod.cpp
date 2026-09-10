@@ -630,7 +630,7 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["fft_margin_avg_db"] = msg.getFftMarginAvgDb();
     lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
-	lora["decode_path"] = msg.getDecodePath();
+    lora["decode_path"] = msg.getDecodePath();
     lora["payload_hex"]   = QString(msg.getBytes().left(static_cast<int>(msg.getPacketSize())).toHex());
     root["lora"] = lora;
 
