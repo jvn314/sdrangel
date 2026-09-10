@@ -280,6 +280,7 @@ namespace MeshtasticDemodMsg
         float getFftMarginAvgDb() const { return m_fftMarginAvgDb; }
         unsigned int getFftMarginLt1Db() const { return m_fftMarginLt1Db; }
         unsigned int getFftMarginLt3Db() const { return m_fftMarginLt3Db; }
+        const QString& getDecodePath() const { return m_decodePath; }
         const QString& getMsgTimestamp() const { return m_msgTimestamp; }
         unsigned int getPacketSize() const { return m_packetSize; }
         unsigned int getNbParityBits() const { return m_nbParityBits; }
@@ -328,6 +329,9 @@ namespace MeshtasticDemodMsg
         }
         void setFftMarginLt3Db(unsigned int count) {
             m_fftMarginLt3Db = count;
+        }
+        void setDecodePath(const QString& decodePath) { 
+            m_decodePath = decodePath;
         }
         void setMsgTimestamp(const QString& ts) {
             m_msgTimestamp = ts;
@@ -383,6 +387,7 @@ namespace MeshtasticDemodMsg
         float m_fftMarginAvgDb;
         unsigned int m_fftMarginLt1Db;
         unsigned int m_fftMarginLt3Db;
+        QString m_decodePath;
         QString m_msgTimestamp;
         unsigned int m_packetSize;
         unsigned int m_nbParityBits;
@@ -422,6 +427,7 @@ namespace MeshtasticDemodMsg
             m_headerCRCStatus(false),
             m_payloadParityStatus((int) MeshtasticDemodSettings::ParityUndefined),
             m_payloadCRCStatus(false),
+            m_decodePath("unknown"),
             m_pipelineId(-1)
         { }
     };
