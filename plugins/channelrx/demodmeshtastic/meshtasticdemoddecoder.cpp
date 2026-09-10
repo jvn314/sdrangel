@@ -236,6 +236,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             m_payloadCRCStatus = s.payloadCRCStatus;
         };
 
+        QString decodePath = "failed";
+
         if (canSoftDecode)
         {
             unsigned int headerNbSymbolBits;
@@ -288,14 +290,24 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
                 if (hardState.payloadCRCStatus) {
                     restoreLoRaState(hardState);
+                    decodePath = "hard";
                 } else {
                     restoreLoRaState(softState);
+                    decodePath = "soft";
                 }
+            }
+            else if (m_payloadCRCStatus)
+            {
+                decodePath = "soft";
             }
         }
         else
         {
             decodeSymbols(msg.getSymbols(), msgBytes);
+            if (m_payloadCRCStatus)
+            {
+                decodePath = "hard";
+            }
         }
 
         if (m_hasCRC && !m_payloadCRCStatus && (m_spreadFactor >= 5U))
@@ -327,6 +339,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 if (shiftedState.payloadCRCStatus)
                 {
                     restoreLoRaState(shiftedState);
+                    decodePath = (delta == -1) ? "minus1_bin" : "plus1_bin";
                     recovered = true;
                     break;
                 }
@@ -375,6 +388,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setPayloadCRCStatus(getPayloadCRCStatus());
             outputMsg->setPipelineMetadata(m_pipelineId, m_pipelineName, m_pipelinePreset);
             outputMsg->setDechirpedSpectrum(msg.getDechirpedSpectrum());
+            outputMsg->setDecodePath(decodePath);
             m_outputMessageQueue->push(outputMsg);
         }
 
