@@ -631,6 +631,17 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
     lora["decode_path"] = msg.getDecodePath();
+
+    if (msg.getHasCRC() && !msg.getPayloadCRCStatus())
+    {
+        QJsonObject decodeAttempts;
+        decodeAttempts["soft_hex"] = QString(msg.getDecodeSoftBytes().toHex());
+        decodeAttempts["hard_hex"] = QString(msg.getDecodeHardBytes().toHex());
+        decodeAttempts["minus1_hex"] = QString(msg.getDecodeMinus1Bytes().toHex());
+        decodeAttempts["plus1_hex"] = QString(msg.getDecodePlus1Bytes().toHex());
+        lora["decode_attempts"] = decodeAttempts;
+    }
+
     lora["payload_hex"]   = QString(msg.getBytes().left(static_cast<int>(msg.getPacketSize())).toHex());
     root["lora"] = lora;
 
