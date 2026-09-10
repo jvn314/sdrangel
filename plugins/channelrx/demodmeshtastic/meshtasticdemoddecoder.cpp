@@ -294,6 +294,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             m_payloadCRCStatus = s.payloadCRCStatus;
         };
 
+        QString decodePath = "failed";
+
         if (canSoftDecode)
         {
             unsigned int headerNbSymbolBits;
@@ -346,14 +348,23 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
                 if (hardState.payloadCRCStatus) {
                     restoreLoRaState(hardState);
+                    decodePath = "hard";
                 } else {
                     restoreLoRaState(softState);
                 }
+            }
+            else if (m_payloadCRCStatus)
+            {
+                decodePath = "soft";
             }
         }
         else
         {
             decodeSymbols(msg.getSymbols(), msgBytes);
+            if (m_payloadCRCStatus)
+            {
+                decodePath = "hard";
+            }
         }
 
         if (m_hasCRC && !m_payloadCRCStatus && (m_spreadFactor >= 5U))
@@ -385,6 +396,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 if (shiftedState.payloadCRCStatus)
                 {
                     restoreLoRaState(shiftedState);
+                    decodePath = (delta == -1) ? "minus1_bin" : "plus1_bin";
                     recovered = true;
                     break;
                 }
@@ -426,6 +438,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setFftMarginAvgDb(fftMarginAvgDb);
             outputMsg->setFftMarginLt1Db(fftMarginLt1Db);
             outputMsg->setFftMarginLt3Db(fftMarginLt3Db);
+            outputMsg->setDecodePath(decodePath);
             outputMsg->setMsgTimestamp(msgTimestamp);
             outputMsg->setPacketSize(getPacketLength());
             outputMsg->setNbParityBits(getNbParityBits());
