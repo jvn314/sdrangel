@@ -293,7 +293,6 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     decodePath = "hard";
                 } else {
                     restoreLoRaState(softState);
-                    decodePath = "soft";
                 }
             }
             else if (m_payloadCRCStatus)
