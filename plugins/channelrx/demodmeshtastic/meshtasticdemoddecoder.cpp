@@ -295,6 +295,10 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         };
 
         QString decodePath = "failed";
+        QByteArray decodeSoftBytes;
+        QByteArray decodeHardBytes;
+        QByteArray decodeMinus1Bytes;
+        QByteArray decodePlus1Bytes;
 
         if (canSoftDecode)
         {
@@ -337,6 +341,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             );
 
             const LoRaDecodeState softState = captureLoRaState(msgBytes);
+            decodeSoftBytes = softState.bytes;
 
             // Soft path is canonical for gr-lora_sdr, but if this approximation misses CRC
             // on noisy captures, retry hard decode once and keep whichever path validates.
@@ -345,6 +350,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 QByteArray hardBytes;
                 decodeSymbols(msg.getSymbols(), hardBytes); // hard path updates decoder state
                 const LoRaDecodeState hardState = captureLoRaState(hardBytes);
+                decodeHardBytes = hardState.bytes;
 
                 if (hardState.payloadCRCStatus) {
                     restoreLoRaState(hardState);
@@ -361,6 +367,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         else
         {
             decodeSymbols(msg.getSymbols(), msgBytes);
+            decodeHardBytes = msgBytes;
             if (m_payloadCRCStatus)
             {
                 decodePath = "hard";
@@ -392,6 +399,12 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 QByteArray shiftedBytes;
                 decodeSymbols(shifted, shiftedBytes); // hard-path decode with adjusted symbol indices
                 const LoRaDecodeState shiftedState = captureLoRaState(shiftedBytes);
+
+                if (delta == -1) {
+                    decodeMinus1Bytes = shiftedState.bytes;
+                } else {
+                    decodePlus1Bytes = shiftedState.bytes;
+                }
 
                 if (shiftedState.payloadCRCStatus)
                 {
@@ -439,6 +452,13 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setFftMarginLt1Db(fftMarginLt1Db);
             outputMsg->setFftMarginLt3Db(fftMarginLt3Db);
             outputMsg->setDecodePath(decodePath);
+            if (m_hasCRC && !m_payloadCRCStatus)
+            {
+                outputMsg->setDecodeSoftBytes(decodeSoftBytes);
+                outputMsg->setDecodeHardBytes(decodeHardBytes);
+                outputMsg->setDecodeMinus1Bytes(decodeMinus1Bytes);
+                outputMsg->setDecodePlus1Bytes(decodePlus1Bytes);
+            }
             outputMsg->setMsgTimestamp(msgTimestamp);
             outputMsg->setPacketSize(getPacketLength());
             outputMsg->setNbParityBits(getNbParityBits());
