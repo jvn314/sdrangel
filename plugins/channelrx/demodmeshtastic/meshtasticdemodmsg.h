@@ -281,6 +281,10 @@ namespace MeshtasticDemodMsg
         unsigned int getFftMarginLt1Db() const { return m_fftMarginLt1Db; }
         unsigned int getFftMarginLt3Db() const { return m_fftMarginLt3Db; }
         const QString& getDecodePath() const { return m_decodePath; }
+        const QByteArray& getDecodeSoftBytes() const { return m_decodeSoftBytes; }
+        const QByteArray& getDecodeHardBytes() const { return m_decodeHardBytes; }
+        const QByteArray& getDecodeMinus1Bytes() const { return m_decodeMinus1Bytes; }
+        const QByteArray& getDecodePlus1Bytes() const { return m_decodePlus1Bytes; }
         const QString& getMsgTimestamp() const { return m_msgTimestamp; }
         unsigned int getPacketSize() const { return m_packetSize; }
         unsigned int getNbParityBits() const { return m_nbParityBits; }
@@ -332,6 +336,18 @@ namespace MeshtasticDemodMsg
         }
         void setDecodePath(const QString& decodePath) { 
             m_decodePath = decodePath;
+        }
+        void setDecodeSoftBytes(const QByteArray& bytes) {
+            m_decodeSoftBytes = bytes;
+        }
+        void setDecodeHardBytes(const QByteArray& bytes) {
+            m_decodeHardBytes = bytes;
+        }
+        void setDecodeMinus1Bytes(const QByteArray& bytes) {
+            m_decodeMinus1Bytes = bytes;
+        }
+        void setDecodePlus1Bytes(const QByteArray& bytes) {
+            m_decodePlus1Bytes = bytes;
         }
         void setMsgTimestamp(const QString& ts) {
             m_msgTimestamp = ts;
@@ -388,6 +404,10 @@ namespace MeshtasticDemodMsg
         unsigned int m_fftMarginLt1Db;
         unsigned int m_fftMarginLt3Db;
         QString m_decodePath;
+        QByteArray m_decodeSoftBytes;
+        QByteArray m_decodeHardBytes;
+        QByteArray m_decodeMinus1Bytes;
+        QByteArray m_decodePlus1Bytes;
         QString m_msgTimestamp;
         unsigned int m_packetSize;
         unsigned int m_nbParityBits;
