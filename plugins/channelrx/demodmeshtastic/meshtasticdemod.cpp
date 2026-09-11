@@ -32,6 +32,7 @@
 #include <QBuffer>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 
 #include <algorithm>
 #include <array>
@@ -631,6 +632,27 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
     lora["decode_path"] = msg.getDecodePath();
+
+    if (!msg.getFftPeakDiagnostics().empty())
+    {
+        QJsonArray fftPeaks;
+
+        for (const MeshtasticDemodMsg::FftPeakDiagnostic& peak : msg.getFftPeakDiagnostics())
+        {
+            QJsonArray symbolPeak;
+            symbolPeak.append(peak.bestBin);
+            symbolPeak.append(peak.secondBin);
+            symbolPeak.append(peak.secondOffset);
+            symbolPeak.append(peak.bestPower);
+            symbolPeak.append(peak.secondPower);
+            fftPeaks.append(symbolPeak);
+        }
+
+        lora["fft_peaks"] = fftPeaks;
+        lora["fft_peaks_format"] = QStringLiteral(
+            "[best_bin,second_bin,second_offset,best_power,second_power]"
+        );
+    }
 
     if (msg.getHasCRC() && !msg.getPayloadCRCStatus())
     {
