@@ -29,6 +29,15 @@
 
 namespace MeshtasticDemodMsg
 {
+    struct FftPeakDiagnostic
+    {
+        int bestBin;
+        int secondBin;
+        int secondOffset;
+        float bestPower;
+        float secondPower;
+    };
+
     class MsgDecodeSymbols : public Message {
         MESSAGE_CLASS_DECLARATION
 
@@ -280,6 +289,7 @@ namespace MeshtasticDemodMsg
         float getFftMarginAvgDb() const { return m_fftMarginAvgDb; }
         unsigned int getFftMarginLt1Db() const { return m_fftMarginLt1Db; }
         unsigned int getFftMarginLt3Db() const { return m_fftMarginLt3Db; }
+        const std::vector<FftPeakDiagnostic>& getFftPeakDiagnostics() const { return m_fftPeakDiagnostics; }
         const QString& getDecodePath() const { return m_decodePath; }
         const QByteArray& getDecodeSoftBytes() const { return m_decodeSoftBytes; }
         const QByteArray& getDecodeHardBytes() const { return m_decodeHardBytes; }
@@ -333,6 +343,9 @@ namespace MeshtasticDemodMsg
         }
         void setFftMarginLt3Db(unsigned int count) {
             m_fftMarginLt3Db = count;
+        }
+        void setFftPeakDiagnostics(const std::vector<FftPeakDiagnostic>& diagnostics) {
+            m_fftPeakDiagnostics = diagnostics;
         }
         void setDecodePath(const QString& decodePath) { 
             m_decodePath = decodePath;
@@ -403,6 +416,7 @@ namespace MeshtasticDemodMsg
         float m_fftMarginAvgDb;
         unsigned int m_fftMarginLt1Db;
         unsigned int m_fftMarginLt3Db;
+        std::vector<FftPeakDiagnostic> m_fftPeakDiagnostics;
         QString m_decodePath;
         QByteArray m_decodeSoftBytes;
         QByteArray m_decodeHardBytes;
