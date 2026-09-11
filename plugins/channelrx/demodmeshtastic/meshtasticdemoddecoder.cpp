@@ -194,6 +194,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         unsigned int fftMarginCount = 0U;
         unsigned int fftMarginLt1Db = 0U;
         unsigned int fftMarginLt3Db = 0U;
+        std::vector<MeshtasticDemodMsg::FftPeakDiagnostic> fftPeakDiagnostics;
+        fftPeakDiagnostics.reserve(msgMags.size());
 
         for (const std::vector<float>& mags : msgMags)
         {
@@ -203,23 +205,50 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
             float best = 0.0f;
             float secondBest = 0.0f;
+            int bestBin = -1;
+            int secondBin = -1;
 
-            for (float mag : mags)
+            for (size_t bin = 0; bin < mags.size(); ++bin)
             {
+                const float mag = mags[bin];
+
                 if (mag > best)
                 {
                     secondBest = best;
+                    secondBin = bestBin;
                     best = mag;
+                    bestBin = static_cast<int>(bin);
                 }
                 else if (mag > secondBest)
                 {
                     secondBest = mag;
+                    secondBin = static_cast<int>(bin);
                 }
             }
 
             if (best <= 0.0f) {
                 continue;
             }
+
+            int secondOffset = 0;
+            if ((bestBin >= 0) && (secondBin >= 0))
+            {
+                const int nBins = static_cast<int>(mags.size());
+                secondOffset = secondBin - bestBin;
+                if (secondOffset > (nBins / 2)) {
+                    secondOffset -= nBins;
+                } else if (secondOffset < -(nBins / 2)) {
+                    secondOffset += nBins;
+                }
+            }
+
+            MeshtasticDemodMsg::FftPeakDiagnostic peakDiagnostic;
+            peakDiagnostic.bestBin = bestBin;
+            peakDiagnostic.secondBin = secondBin;
+            peakDiagnostic.secondOffset = secondOffset;
+            peakDiagnostic.bestPower = best;
+            peakDiagnostic.secondPower = secondBest;
+            fftPeakDiagnostics.push_back(peakDiagnostic);
 
             const float marginDb =
                 10.0f * std::log10(best / std::max(secondBest, 1.0e-30f));
@@ -451,6 +480,12 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setFftMarginAvgDb(fftMarginAvgDb);
             outputMsg->setFftMarginLt1Db(fftMarginLt1Db);
             outputMsg->setFftMarginLt3Db(fftMarginLt3Db);
+            if ((decodePath == QStringLiteral("failed"))
+                || (decodePath == QStringLiteral("minus1_bin"))
+                || (decodePath == QStringLiteral("plus1_bin")))
+            {
+                outputMsg->setFftPeakDiagnostics(fftPeakDiagnostics);
+            }
             outputMsg->setDecodePath(decodePath);
             if (m_hasCRC && !m_payloadCRCStatus)
             {
