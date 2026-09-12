@@ -645,12 +645,14 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
             symbolPeak.append(peak.secondOffset);
             symbolPeak.append(peak.bestPower);
             symbolPeak.append(peak.secondPower);
+            symbolPeak.append(peak.sfoCumBefore);
+            symbolPeak.append(peak.timingStepAfterSymbol);
             fftPeaks.append(symbolPeak);
         }
 
         lora["fft_peaks"] = fftPeaks;
         lora["fft_peaks_format"] = QStringLiteral(
-            "[best_bin,second_bin,second_offset,best_power,second_power]"
+            "[best_bin,second_bin,second_offset,best_power,second_power,sfo_cum_before,timing_step_after_symbol]"
         );
     }
 
