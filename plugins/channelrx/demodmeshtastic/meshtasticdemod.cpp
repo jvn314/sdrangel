@@ -633,6 +633,14 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
     lora["decode_path"] = msg.getDecodePath();
 
+    if (msg.getHeaderLockDiagnosticValid())
+    {
+        QJsonObject headerLock;
+        headerLock["offset"] = static_cast<int>(msg.getHeaderLockOffset());
+        headerLock["delta"] = msg.getHeaderLockDelta();
+        lora["header_lock"] = headerLock;
+    }
+
     if (!msg.getFftPeakDiagnostics().empty())
     {
         QJsonArray fftPeaks;
@@ -653,6 +661,32 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         lora["fft_peaks"] = fftPeaks;
         lora["fft_peaks_format"] = QStringLiteral(
             "[best_bin,second_bin,second_offset,best_power,second_power,sfo_cum_before,timing_step_after_symbol]"
+        );
+    }
+
+    if (!msg.getSymbolMappingDiagnostics().empty())
+    {
+        QJsonArray symbolMapping;
+
+        for (const MeshtasticDemodMsg::SymbolMappingDiagnostic& diagnostic : msg.getSymbolMappingDiagnostics())
+        {
+            QJsonArray symbolMap;
+            symbolMap.append(static_cast<int>(diagnostic.rawSymbol));
+            symbolMap.append(static_cast<int>(diagnostic.shiftedBin));
+            symbolMap.append(static_cast<int>(diagnostic.spread));
+            symbolMap.append(static_cast<int>(diagnostic.evaluatedSymbol));
+            symbolMap.append(static_cast<int>(diagnostic.decoderSymbol));
+            symbolMap.append(diagnostic.headerSymbol);
+            symbolMap.append(diagnostic.cfoInt);
+            symbolMap.append(diagnostic.cfoFrac);
+            symbolMap.append(diagnostic.stoFrac);
+            symbolMap.append(diagnostic.stoShift);
+            symbolMapping.append(symbolMap);
+        }
+
+        lora["symbol_mapping"] = symbolMapping;
+        lora["symbol_mapping_format"] = QStringLiteral(
+            "[raw_symbol,shifted_bin,spread,evaluated_symbol,decoder_symbol,header_symbol,cfo_int,cfo_frac,sto_frac,sto_shift]"
         );
     }
 
