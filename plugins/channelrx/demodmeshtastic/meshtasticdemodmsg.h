@@ -36,6 +36,8 @@ namespace MeshtasticDemodMsg
         int secondOffset;
         float bestPower;
         float secondPower;
+        float sfoCumBefore;
+        int timingStepAfterSymbol;
     };
 
     class MsgDecodeSymbols : public Message {
@@ -45,6 +47,8 @@ namespace MeshtasticDemodMsg
         const std::vector<unsigned short>& getSymbols() const { return m_symbols; }
         const std::vector<std::vector<float>>& getMagnitudes() const { return m_magnitudes; }
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
+        const std::vector<float>& getSfoCumBefore() const { return m_sfoCumBefore; }
+        const std::vector<int>& getTimingStepAfterSymbol() const { return m_timingStepAfterSymbol; }
         uint32_t getFrameId() const { return m_frameId; }
         unsigned int getSyncWord() const { return m_syncWord; }
         float getSingalDb() const { return m_signalDb; }
@@ -84,6 +88,10 @@ namespace MeshtasticDemodMsg
         void pushBackDechirpedSpectrumLine(const std::vector<float>& spectrumLine) {
             m_dechirpedSpectrum.push_back(spectrumLine);
         }
+        void pushBackTimingDiagnostic(float sfoCumBefore, int timingStepAfterSymbol) {
+            m_sfoCumBefore.push_back(sfoCumBefore);
+            m_timingStepAfterSymbol.push_back(timingStepAfterSymbol);
+        }
         void dropFront(unsigned int count)
         {
             const unsigned int symbolsDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_symbols.size()));
@@ -94,6 +102,12 @@ namespace MeshtasticDemodMsg
 
             const unsigned int spectrumDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_dechirpedSpectrum.size()));
             m_dechirpedSpectrum.erase(m_dechirpedSpectrum.begin(), m_dechirpedSpectrum.begin() + spectrumDrop);
+
+            const unsigned int sfoCumDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_sfoCumBefore.size()));
+            m_sfoCumBefore.erase(m_sfoCumBefore.begin(), m_sfoCumBefore.begin() + sfoCumDrop);
+
+            const unsigned int timingStepDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_timingStepAfterSymbol.size()));
+            m_timingStepAfterSymbol.erase(m_timingStepAfterSymbol.begin(), m_timingStepAfterSymbol.begin() + timingStepDrop);
         }
 
         static MsgDecodeSymbols* create() {
@@ -107,6 +121,8 @@ namespace MeshtasticDemodMsg
         std::vector<unsigned short> m_symbols;
         std::vector<std::vector<float>> m_magnitudes;
         std::vector<std::vector<float>> m_dechirpedSpectrum;
+        std::vector<float> m_sfoCumBefore;
+        std::vector<int> m_timingStepAfterSymbol;
         uint32_t m_frameId;
         unsigned int m_syncWord;
         float m_signalDb;
