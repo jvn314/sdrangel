@@ -576,6 +576,13 @@ QString getMeshField(const modemmeshtastic::DecodeResult& result, const QString&
     return QString();
 }
 
+// Keep JSON diagnostics compact and stable. Three fractional digits are
+// sufficient for RF, FFT, timing, and symbol-mapping diagnostics.
+double diagnosticValue(double value)
+{
+    return std::round(value * 1000.0) / 1000.0;
+}
+
 } // namespace
 
 QString MeshtasticDemod::buildMeshtasticJsonPacket(
@@ -595,11 +602,11 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         m_basebandCenterFrequency + m_settings.m_inputFrequencyOffset);
     rf["bandwidth_hz"]    = MeshtasticDemodSettings::bandwidths[m_settings.m_bandwidthIndex];
     rf["spreading_factor"] = m_settings.m_spreadFactor;
-    rf["signal_db"]       = msg.getSingalDb();
-    rf["noise_db"]        = msg.getNoiseDb();
-    rf["snr_db"]          = msg.getSingalDb() - msg.getNoiseDb();
-	rf["cfo_hz"]          = msg.getCfoHz();
-    rf["sfo_ppm"]         = msg.getSfoPpm();
+    rf["signal_db"]       = diagnosticValue(msg.getSingalDb());
+    rf["noise_db"]        = diagnosticValue(msg.getNoiseDb());
+    rf["snr_db"]          = diagnosticValue(msg.getSingalDb() - msg.getNoiseDb());
+	rf["cfo_hz"]          = diagnosticValue(msg.getCfoHz());
+    rf["sfo_ppm"]         = diagnosticValue(msg.getSfoPpm());
     root["rf"] = rf;
 
     // LoRa
@@ -627,8 +634,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["packet_length"] = static_cast<int>(msg.getPacketSize());
     lora["nb_symbols"]    = static_cast<int>(msg.getNbSymbols());
     lora["nb_codewords"]  = static_cast<int>(msg.getNbCodewords());
-	lora["fft_margin_min_db"] = msg.getFftMarginMinDb();
-    lora["fft_margin_avg_db"] = msg.getFftMarginAvgDb();
+	lora["fft_margin_min_db"] = diagnosticValue(msg.getFftMarginMinDb());
+    lora["fft_margin_avg_db"] = diagnosticValue(msg.getFftMarginAvgDb());
     lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
     lora["decode_path"] = msg.getDecodePath();
@@ -651,9 +658,9 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
             symbolPeak.append(peak.bestBin);
             symbolPeak.append(peak.secondBin);
             symbolPeak.append(peak.secondOffset);
-            symbolPeak.append(peak.bestPower);
-            symbolPeak.append(peak.secondPower);
-            symbolPeak.append(peak.sfoCumBefore);
+            symbolPeak.append(diagnosticValue(peak.bestPower));
+            symbolPeak.append(diagnosticValue(peak.secondPower));
+            symbolPeak.append(diagnosticValue(peak.sfoCumBefore));
             symbolPeak.append(peak.timingStepAfterSymbol);
             fftPeaks.append(symbolPeak);
         }
@@ -678,8 +685,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
             symbolMap.append(static_cast<int>(diagnostic.decoderSymbol));
             symbolMap.append(diagnostic.headerSymbol);
             symbolMap.append(diagnostic.cfoInt);
-            symbolMap.append(diagnostic.cfoFrac);
-            symbolMap.append(diagnostic.stoFrac);
+            symbolMap.append(diagnosticValue(diagnostic.cfoFrac));
+            symbolMap.append(diagnosticValue(diagnostic.stoFrac));
             symbolMap.append(diagnostic.stoShift);
             symbolMapping.append(symbolMap);
         }
