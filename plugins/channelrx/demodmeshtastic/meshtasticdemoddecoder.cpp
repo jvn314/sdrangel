@@ -188,6 +188,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
         QByteArray msgBytes;
         const std::vector<std::vector<float>>& msgMags = msg.getMagnitudes();
+        const std::vector<float>& msgSfoCumBefore = msg.getSfoCumBefore();
+        const std::vector<int>& msgTimingStepAfterSymbol = msg.getTimingStepAfterSymbol();
 
         float fftMarginMinDb = 0.0f;
         double fftMarginSumDb = 0.0;
@@ -197,8 +199,10 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         std::vector<MeshtasticDemodMsg::FftPeakDiagnostic> fftPeakDiagnostics;
         fftPeakDiagnostics.reserve(msgMags.size());
 
-        for (const std::vector<float>& mags : msgMags)
+        for (size_t symbolIndex = 0; symbolIndex < msgMags.size(); ++symbolIndex)
         {
+            const std::vector<float>& mags = msgMags[symbolIndex];
+
             if (mags.size() < 2U) {
                 continue;
             }
@@ -248,6 +252,10 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             peakDiagnostic.secondOffset = secondOffset;
             peakDiagnostic.bestPower = best;
             peakDiagnostic.secondPower = secondBest;
+            peakDiagnostic.sfoCumBefore =
+                symbolIndex < msgSfoCumBefore.size() ? msgSfoCumBefore[symbolIndex] : 0.0f;
+            peakDiagnostic.timingStepAfterSymbol =
+                symbolIndex < msgTimingStepAfterSymbol.size() ? msgTimingStepAfterSymbol[symbolIndex] : 0;
             fftPeakDiagnostics.push_back(peakDiagnostic);
 
             const float marginDb =
