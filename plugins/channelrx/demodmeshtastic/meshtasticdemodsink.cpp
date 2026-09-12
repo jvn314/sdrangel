@@ -407,6 +407,7 @@ void MeshtasticDemodSink::tryHeaderLock()
 
             m_expectedSymbols = expectedSymbols;
             m_headerLocked = true;
+            m_decodeMsg->setHeaderLockDiagnostic(offset, delta);
 
             // qDebug("[LOOPBACK][RX] header_realign frameId=%u offset=%u delta=%d", m_loRaFrameId, offset, delta);
             qDebug("MeshtasticDemodSink::tryHeaderLock: LOCKED len=%u CR=%u CRC=%s LDRO=%s expected=%u symbols offset=%u delta=%d",
@@ -1177,6 +1178,32 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
     const unsigned short symbol = evalSymbol(rawSymbol, headerSymbol) % m_nbSymbolsEff;
     m_decodeMsg->pushBackSymbol(symbol);
     m_decodeMsg->pushBackMagnitudes(symbolMags);
+
+    unsigned int symbolSpread = m_fftInterpolation * (1U << m_settings.m_deBits);
+    const unsigned int symbolBins = m_fftInterpolation * m_nbSymbols;
+
+    if (headerSymbol)
+    {
+        const int de = m_settings.m_deBits;
+        if (de < 2) {
+            symbolSpread <<= (2 - de);
+        }
+    }
+
+    MeshtasticDemodMsg::SymbolMappingDiagnostic mappingDiagnostic;
+    mappingDiagnostic.rawSymbol = rawSymbol;
+    mappingDiagnostic.shiftedBin = symbolBins > 0U
+        ? (rawSymbol + symbolBins - 1U) % symbolBins
+        : rawSymbol;
+    mappingDiagnostic.spread = symbolSpread;
+    mappingDiagnostic.evaluatedSymbol = evalSymbol(rawSymbol, headerSymbol);
+    mappingDiagnostic.decoderSymbol = symbol;
+    mappingDiagnostic.headerSymbol = headerSymbol;
+    mappingDiagnostic.cfoInt = m_loRaCFOInt;
+    mappingDiagnostic.cfoFrac = m_loRaCFOFrac;
+    mappingDiagnostic.stoFrac = m_loRaSTOFrac;
+    mappingDiagnostic.stoShift = stoShift;
+    m_decodeMsg->pushBackSymbolMappingDiagnostic(mappingDiagnostic);
 
     if (m_spectrumBuffer)
     {
