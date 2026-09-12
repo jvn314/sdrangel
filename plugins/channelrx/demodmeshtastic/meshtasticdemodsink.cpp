@@ -1210,6 +1210,23 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
         tryHeaderLock();
     }
 
+    const bool finalizeAfterSymbol = m_headerLocked
+        ? (m_loRaFrameSymbolCount >= m_expectedSymbols)
+        : (m_loRaFrameSymbolCount >= m_settings.m_nbSymbolsMax);
+    const float sfoCumBefore = m_loRaSFOCum;
+    int timingStepAfterSymbol = 0;
+
+    // The timing correction below changes the sample consumption for the next
+    // symbol. A final symbol has no following payload symbol, so record no
+    // applied timing step for it.
+    if (!finalizeAfterSymbol
+        && (std::abs(m_loRaSFOCum) > (1.0f / (2.0f * static_cast<float>(m_osFactor)))))
+    {
+        timingStepAfterSymbol = std::signbit(m_loRaSFOCum) ? -1 : 1;
+    }
+
+    m_decodeMsg->pushBackTimingDiagnostic(sfoCumBefore, timingStepAfterSymbol);
+
     if (m_headerLocked)
     {
         if (m_loRaFrameSymbolCount >= m_expectedSymbols) {
