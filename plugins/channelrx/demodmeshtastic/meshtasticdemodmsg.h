@@ -40,6 +40,20 @@ namespace MeshtasticDemodMsg
         int timingStepAfterSymbol;
     };
 
+    struct SymbolMappingDiagnostic
+    {
+        unsigned int rawSymbol;
+        unsigned int shiftedBin;
+        unsigned int spread;
+        unsigned int evaluatedSymbol;
+        unsigned int decoderSymbol;
+        bool headerSymbol;
+        int cfoInt;
+        float cfoFrac;
+        float stoFrac;
+        int stoShift;
+    };
+
     class MsgDecodeSymbols : public Message {
         MESSAGE_CLASS_DECLARATION
 
@@ -49,6 +63,10 @@ namespace MeshtasticDemodMsg
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
         const std::vector<float>& getSfoCumBefore() const { return m_sfoCumBefore; }
         const std::vector<int>& getTimingStepAfterSymbol() const { return m_timingStepAfterSymbol; }
+        const std::vector<SymbolMappingDiagnostic>& getSymbolMappingDiagnostics() const { return m_symbolMappingDiagnostics; }
+        bool getHeaderLockDiagnosticValid() const { return m_headerLockDiagnosticValid; }
+        unsigned int getHeaderLockOffset() const { return m_headerLockOffset; }
+        int getHeaderLockDelta() const { return m_headerLockDelta; }
         uint32_t getFrameId() const { return m_frameId; }
         unsigned int getSyncWord() const { return m_syncWord; }
         float getSingalDb() const { return m_signalDb; }
@@ -92,6 +110,14 @@ namespace MeshtasticDemodMsg
             m_sfoCumBefore.push_back(sfoCumBefore);
             m_timingStepAfterSymbol.push_back(timingStepAfterSymbol);
         }
+        void pushBackSymbolMappingDiagnostic(const SymbolMappingDiagnostic& diagnostic) {
+            m_symbolMappingDiagnostics.push_back(diagnostic);
+        }
+        void setHeaderLockDiagnostic(unsigned int offset, int delta) {
+            m_headerLockDiagnosticValid = true;
+            m_headerLockOffset = offset;
+            m_headerLockDelta = delta;
+        }
         void dropFront(unsigned int count)
         {
             const unsigned int symbolsDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_symbols.size()));
@@ -108,6 +134,9 @@ namespace MeshtasticDemodMsg
 
             const unsigned int timingStepDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_timingStepAfterSymbol.size()));
             m_timingStepAfterSymbol.erase(m_timingStepAfterSymbol.begin(), m_timingStepAfterSymbol.begin() + timingStepDrop);
+
+            const unsigned int symbolMappingDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_symbolMappingDiagnostics.size()));
+            m_symbolMappingDiagnostics.erase(m_symbolMappingDiagnostics.begin(), m_symbolMappingDiagnostics.begin() + symbolMappingDrop);
         }
 
         static MsgDecodeSymbols* create() {
@@ -123,6 +152,10 @@ namespace MeshtasticDemodMsg
         std::vector<std::vector<float>> m_dechirpedSpectrum;
         std::vector<float> m_sfoCumBefore;
         std::vector<int> m_timingStepAfterSymbol;
+        std::vector<SymbolMappingDiagnostic> m_symbolMappingDiagnostics;
+        bool m_headerLockDiagnosticValid;
+        unsigned int m_headerLockOffset;
+        int m_headerLockDelta;
         uint32_t m_frameId;
         unsigned int m_syncWord;
         float m_signalDb;
@@ -132,6 +165,9 @@ namespace MeshtasticDemodMsg
 
         MsgDecodeSymbols() : //!< create an empty message
             Message(),
+            m_headerLockDiagnosticValid(false),
+            m_headerLockOffset(0),
+            m_headerLockDelta(0),
             m_frameId(0),
             m_syncWord(0),
             m_signalDb(0.0),
@@ -141,6 +177,9 @@ namespace MeshtasticDemodMsg
         {}
         MsgDecodeSymbols(const std::vector<unsigned short> symbols) : //!< create a message with symbols copy
             Message(),
+            m_headerLockDiagnosticValid(false),
+            m_headerLockOffset(0),
+            m_headerLockDelta(0),
             m_frameId(0),
             m_syncWord(0),
             m_signalDb(0.0),
@@ -306,6 +345,10 @@ namespace MeshtasticDemodMsg
         unsigned int getFftMarginLt1Db() const { return m_fftMarginLt1Db; }
         unsigned int getFftMarginLt3Db() const { return m_fftMarginLt3Db; }
         const std::vector<FftPeakDiagnostic>& getFftPeakDiagnostics() const { return m_fftPeakDiagnostics; }
+        const std::vector<SymbolMappingDiagnostic>& getSymbolMappingDiagnostics() const { return m_symbolMappingDiagnostics; }
+        bool getHeaderLockDiagnosticValid() const { return m_headerLockDiagnosticValid; }
+        unsigned int getHeaderLockOffset() const { return m_headerLockOffset; }
+        int getHeaderLockDelta() const { return m_headerLockDelta; }
         const QString& getDecodePath() const { return m_decodePath; }
         const QByteArray& getDecodeSoftBytes() const { return m_decodeSoftBytes; }
         const QByteArray& getDecodeHardBytes() const { return m_decodeHardBytes; }
@@ -362,6 +405,14 @@ namespace MeshtasticDemodMsg
         }
         void setFftPeakDiagnostics(const std::vector<FftPeakDiagnostic>& diagnostics) {
             m_fftPeakDiagnostics = diagnostics;
+        }
+        void setSymbolMappingDiagnostics(const std::vector<SymbolMappingDiagnostic>& diagnostics) {
+            m_symbolMappingDiagnostics = diagnostics;
+        }
+        void setHeaderLockDiagnostic(bool valid, unsigned int offset, int delta) {
+            m_headerLockDiagnosticValid = valid;
+            m_headerLockOffset = offset;
+            m_headerLockDelta = delta;
         }
         void setDecodePath(const QString& decodePath) { 
             m_decodePath = decodePath;
@@ -433,6 +484,10 @@ namespace MeshtasticDemodMsg
         unsigned int m_fftMarginLt1Db;
         unsigned int m_fftMarginLt3Db;
         std::vector<FftPeakDiagnostic> m_fftPeakDiagnostics;
+        std::vector<SymbolMappingDiagnostic> m_symbolMappingDiagnostics;
+        bool m_headerLockDiagnosticValid;
+        unsigned int m_headerLockOffset;
+        int m_headerLockDelta;
         QString m_decodePath;
         QByteArray m_decodeSoftBytes;
         QByteArray m_decodeHardBytes;
@@ -467,6 +522,9 @@ namespace MeshtasticDemodMsg
             m_fftMarginAvgDb(0.0),
             m_fftMarginLt1Db(0),
             m_fftMarginLt3Db(0),
+            m_headerLockDiagnosticValid(false),
+            m_headerLockOffset(0),
+            m_headerLockDelta(0),
             m_packetSize(0),
             m_nbParityBits(0),
             m_nbSymbols(0),
