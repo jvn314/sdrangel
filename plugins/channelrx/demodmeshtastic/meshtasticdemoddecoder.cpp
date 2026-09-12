@@ -493,7 +493,13 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 || (decodePath == QStringLiteral("plus1_bin")))
             {
                 outputMsg->setFftPeakDiagnostics(fftPeakDiagnostics);
+                outputMsg->setSymbolMappingDiagnostics(msg.getSymbolMappingDiagnostics());
             }
+            outputMsg->setHeaderLockDiagnostic(
+                msg.getHeaderLockDiagnosticValid(),
+                msg.getHeaderLockOffset(),
+                msg.getHeaderLockDelta()
+            );
             outputMsg->setDecodePath(decodePath);
             if (m_hasCRC && !m_payloadCRCStatus)
             {
