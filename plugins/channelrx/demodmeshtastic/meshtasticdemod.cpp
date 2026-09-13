@@ -707,6 +707,98 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         lora["decode_attempts"] = decodeAttempts;
     }
 
+    if (!msg.getDecodeAttemptDiagnostics().empty())
+    {
+        QJsonObject decoderDiagnostics;
+        QJsonObject packetMetadata;
+        packetMetadata["base_has_crc"] = msg.getBaseHasCRC();
+        packetMetadata["base_header_crc_passed"] = msg.getBaseHeaderCRCStatus();
+        packetMetadata["header_raw_residue_modulus"] = static_cast<int>(msg.getHeaderRawResidueModulus());
+        packetMetadata["header_raw_residue_mode"] = msg.getHeaderRawResidueMode();
+
+        QJsonArray headerRawResidues;
+        for (int residue : msg.getHeaderRawResidues()) {
+            headerRawResidues.append(residue);
+        }
+        packetMetadata["header_raw_residues"] = headerRawResidues;
+
+        QJsonArray headerDecodedSymbols;
+        for (unsigned short symbol : msg.getHeaderDecodedSymbols()) {
+            headerDecodedSymbols.append(static_cast<int>(symbol));
+        }
+        packetMetadata["header_decoded_symbols"] = headerDecodedSymbols;
+        decoderDiagnostics["packet_metadata"] = packetMetadata;
+
+        QJsonArray attempts;
+
+        for (const MeshtasticDemodMsg::DecodeAttemptDiagnostic& diagnostic : msg.getDecodeAttemptDiagnostics())
+        {
+            QJsonObject attempt;
+            attempt["attempt_id"] = diagnostic.attemptId;
+            attempt["header_delta"] = diagnostic.headerDelta;
+            attempt["payload_delta"] = diagnostic.payloadDelta;
+            attempt["executed"] = diagnostic.executed;
+            attempt["stop_reason"] = diagnostic.stopReason;
+
+            QString headerCRCState = QStringLiteral("not_computed");
+            if (diagnostic.headerCRCComputed) {
+                headerCRCState = diagnostic.headerCRCStatus
+                    ? QStringLiteral("pass")
+                    : QStringLiteral("fail");
+            }
+            attempt["header_crc_state"] = headerCRCState;
+
+            if (diagnostic.executed)
+            {
+                attempt["has_crc"] = diagnostic.hasCRC;
+                attempt["packet_length"] = static_cast<int>(diagnostic.packetLength);
+                attempt["nb_parity_bits"] = static_cast<int>(diagnostic.nbParityBits);
+                attempt["early_eom"] = diagnostic.earlyEOM;
+                attempt["payload_fec"] = diagnostic.payloadDecodeCompleted
+                    ? parityStatusToStr(diagnostic.payloadParityStatus)
+                    : QStringLiteral("n/a");
+
+                if (diagnostic.payloadCRCComputed) {
+                    attempt["payload_crc"] = diagnostic.payloadCRCStatus
+                        ? QStringLiteral("pass")
+                        : QStringLiteral("fail");
+                } else {
+                    attempt["payload_crc"] = QStringLiteral("n/a");
+                }
+
+                attempt["crc_values_valid"] = diagnostic.payloadCRCComputed;
+
+                if (diagnostic.payloadCRCComputed)
+                {
+                    attempt["crc_data_offset"] = static_cast<int>(diagnostic.crcDataOffset);
+                    attempt["crc16_byte_count"] = static_cast<int>(diagnostic.crc16ByteCount);
+                    attempt["crc_tail_byte0_offset"] = static_cast<int>(diagnostic.crcTailByte0Offset);
+                    attempt["crc_tail_byte1_offset"] = static_cast<int>(diagnostic.crcTailByte1Offset);
+                    attempt["received_crc_offset"] = static_cast<int>(diagnostic.receivedCRCOffset);
+                    attempt["calculated_crc"] = static_cast<int>(diagnostic.calculatedCRC);
+                    attempt["received_crc"] = static_cast<int>(diagnostic.receivedCRC);
+                    attempt["crc_xor"] = static_cast<int>(
+                        diagnostic.calculatedCRC ^ diagnostic.receivedCRC);
+                }
+
+                attempt["attempt_hex"] = QString(diagnostic.bytes.toHex());
+            }
+            else
+            {
+                attempt["payload_fec"] = QStringLiteral("n/a");
+                attempt["payload_crc"] = QStringLiteral("n/a");
+                attempt["crc_values_valid"] = false;
+                attempt["attempt_hex"] = QString();
+            }
+
+            attempts.append(attempt);
+        }
+
+        decoderDiagnostics["attempt_hex_format"] = QStringLiteral("wire_order_payload_bytes");
+        decoderDiagnostics["attempts"] = attempts;
+        lora["decoder_diagnostics"] = decoderDiagnostics;
+    }
+
     lora["payload_hex"]   = QString(msg.getBytes().left(static_cast<int>(msg.getPacketSize())).toHex());
     root["lora"] = lora;
 
