@@ -20,6 +20,7 @@
 #ifndef INCLUDE_MESHTASTICDEMODDECODERLORA_H
 #define INCLUDE_MESHTASTICDEMODDECODERLORA_H
 
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -28,6 +29,20 @@
 class MeshtasticDemodDecoderLoRa
 {
 public:
+    struct DecodeTrace
+    {
+        bool headerCRCComputed = false;
+        bool payloadDecodeCompleted = false;
+        bool payloadCRCComputed = false;
+        unsigned int crcDataOffset = 0U;
+        unsigned int crc16ByteCount = 0U;
+        unsigned int crcTailByte0Offset = 0U;
+        unsigned int crcTailByte1Offset = 0U;
+        unsigned int receivedCRCOffset = 0U;
+        uint16_t calculatedCRC = 0U;
+        uint16_t receivedCRC = 0U;
+    };
+
     static void decodeBytes(
         QByteArray& bytes,
         const std::vector<unsigned short>& inSymbols,
@@ -41,7 +56,8 @@ public:
         int& headerParityStatus,
         bool& headerCRCStatus,
         int& payloadParityStatus,
-        bool& payloadCRCStatus
+        bool& payloadCRCStatus,
+        DecodeTrace *trace = nullptr
     );
 
     static void decodeBytesSoft(
@@ -60,7 +76,8 @@ public:
         int& headerParityStatus,
         bool& headerCRCStatus,
         int& payloadParityStatus,
-        bool& payloadCRCStatus
+        bool& payloadCRCStatus,
+        DecodeTrace *trace = nullptr
     );
 
     static void getCodingMetrics(
