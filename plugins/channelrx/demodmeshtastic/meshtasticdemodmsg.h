@@ -18,6 +18,7 @@
 #ifndef INCLUDE_MESHTASTICDEMODMSG_H
 #define INCLUDE_MESHTASTICDEMODMSG_H
 
+#include <cstdint>
 #include <vector>
 
 #include <QObject>
@@ -52,6 +53,33 @@ namespace MeshtasticDemodMsg
         float cfoFrac;
         float stoFrac;
         int stoShift;
+    };
+
+    struct DecodeAttemptDiagnostic
+    {
+        QString attemptId;
+        int headerDelta = 0;
+        int payloadDelta = 0;
+        bool executed = false;
+        QString stopReason;
+        bool headerCRCComputed = false;
+        bool headerCRCStatus = false;
+        bool hasCRC = false;
+        unsigned int packetLength = 0U;
+        unsigned int nbParityBits = 0U;
+        bool earlyEOM = false;
+        bool payloadDecodeCompleted = false;
+        int payloadParityStatus = (int) MeshtasticDemodSettings::ParityUndefined;
+        bool payloadCRCComputed = false;
+        bool payloadCRCStatus = false;
+        unsigned int crcDataOffset = 0U;
+        unsigned int crc16ByteCount = 0U;
+        unsigned int crcTailByte0Offset = 0U;
+        unsigned int crcTailByte1Offset = 0U;
+        unsigned int receivedCRCOffset = 0U;
+        uint16_t calculatedCRC = 0U;
+        uint16_t receivedCRC = 0U;
+        QByteArray bytes;
     };
 
     class MsgDecodeSymbols : public Message {
@@ -354,6 +382,13 @@ namespace MeshtasticDemodMsg
         const QByteArray& getDecodeHardBytes() const { return m_decodeHardBytes; }
         const QByteArray& getDecodeMinus1Bytes() const { return m_decodeMinus1Bytes; }
         const QByteArray& getDecodePlus1Bytes() const { return m_decodePlus1Bytes; }
+        const std::vector<DecodeAttemptDiagnostic>& getDecodeAttemptDiagnostics() const { return m_decodeAttemptDiagnostics; }
+        const std::vector<int>& getHeaderRawResidues() const { return m_headerRawResidues; }
+        const std::vector<unsigned short>& getHeaderDecodedSymbols() const { return m_headerDecodedSymbols; }
+        unsigned int getHeaderRawResidueModulus() const { return m_headerRawResidueModulus; }
+        int getHeaderRawResidueMode() const { return m_headerRawResidueMode; }
+        bool getBaseHasCRC() const { return m_baseHasCRC; }
+        bool getBaseHeaderCRCStatus() const { return m_baseHeaderCRCStatus; }
         const QString& getMsgTimestamp() const { return m_msgTimestamp; }
         unsigned int getPacketSize() const { return m_packetSize; }
         unsigned int getNbParityBits() const { return m_nbParityBits; }
@@ -429,6 +464,24 @@ namespace MeshtasticDemodMsg
         void setDecodePlus1Bytes(const QByteArray& bytes) {
             m_decodePlus1Bytes = bytes;
         }
+        void setDecodeAttemptDiagnostics(const std::vector<DecodeAttemptDiagnostic>& diagnostics) {
+            m_decodeAttemptDiagnostics = diagnostics;
+        }
+        void setHeaderRawResidueMetadata(
+            const std::vector<int>& residues,
+            const std::vector<unsigned short>& decodedSymbols,
+            unsigned int modulus,
+            int mode)
+        {
+            m_headerRawResidues = residues;
+            m_headerDecodedSymbols = decodedSymbols;
+            m_headerRawResidueModulus = modulus;
+            m_headerRawResidueMode = mode;
+        }
+        void setBaseRetryGateState(bool hasCRC, bool headerCRCStatus) {
+            m_baseHasCRC = hasCRC;
+            m_baseHeaderCRCStatus = headerCRCStatus;
+        }
         void setMsgTimestamp(const QString& ts) {
             m_msgTimestamp = ts;
         }
@@ -493,6 +546,13 @@ namespace MeshtasticDemodMsg
         QByteArray m_decodeHardBytes;
         QByteArray m_decodeMinus1Bytes;
         QByteArray m_decodePlus1Bytes;
+        std::vector<DecodeAttemptDiagnostic> m_decodeAttemptDiagnostics;
+        std::vector<int> m_headerRawResidues;
+        std::vector<unsigned short> m_headerDecodedSymbols;
+        unsigned int m_headerRawResidueModulus;
+        int m_headerRawResidueMode;
+        bool m_baseHasCRC;
+        bool m_baseHeaderCRCStatus;
         QString m_msgTimestamp;
         unsigned int m_packetSize;
         unsigned int m_nbParityBits;
@@ -536,6 +596,10 @@ namespace MeshtasticDemodMsg
             m_payloadParityStatus((int) MeshtasticDemodSettings::ParityUndefined),
             m_payloadCRCStatus(false),
             m_decodePath("unknown"),
+            m_headerRawResidueModulus(0U),
+            m_headerRawResidueMode(-1),
+            m_baseHasCRC(false),
+            m_baseHeaderCRCStatus(false),
             m_pipelineId(-1)
         { }
     };
