@@ -106,9 +106,14 @@ void MeshtasticDemodDecoderLoRa::decodeBytes(
         int& headerParityStatus,
         bool& headerCRCStatus,
         int& payloadParityStatus,
-        bool& payloadCRCStatus
+        bool& payloadCRCStatus,
+        DecodeTrace *trace
 )
 {
+    if (trace) {
+        *trace = DecodeTrace();
+    }
+
     payloadCRCStatus = false;
 
     // need at least a header (8 symbols of 8 bit codewords) whether an actual header is sent or not
@@ -131,6 +136,10 @@ void MeshtasticDemodDecoderLoRa::decodeBytes(
             earlyEOM = true;
             headerCRCStatus = false;
             return;
+        }
+
+        if (trace) {
+            trace->headerCRCComputed = true;
         }
 
         decodeHeader(
@@ -347,6 +356,10 @@ void MeshtasticDemodDecoderLoRa::decodeBytes(
         payloadParityStatus = (int) MeshtasticDemodSettings::ParityOK;
     }
 
+    if (trace) {
+        trace->payloadDecodeCompleted = true;
+    }
+
     // finalization:
     //   adjust offsets dpending on header and CRC presence
     //   compute and verify payload CRC if present
@@ -363,11 +376,27 @@ void MeshtasticDemodDecoderLoRa::decodeBytes(
                 // Match gr-lora_sdr crc_verif:
                 //   crc16(first pay_len-2 bytes) XOR last 2 bytes inside payload
                 //   compare against trailing CRC bytes.
+                if (trace)
+                {
+                    trace->payloadCRCComputed = true;
+                    trace->crcDataOffset = 0U;
+                    trace->crc16ByteCount = packetLength - 2U;
+                    trace->crcTailByte0Offset = packetLength - 2U;
+                    trace->crcTailByte1Offset = packetLength - 1U;
+                    trace->receivedCRCOffset = packetLength;
+                }
+
                 uint16_t crc = crc16gr(bytes.data() + dOfs, packetLength - 2U);
                 crc = static_cast<uint16_t>(crc ^ static_cast<uint8_t>(bytes[dOfs + packetLength - 1U]));
                 crc = static_cast<uint16_t>(crc ^ (static_cast<uint16_t>(static_cast<uint8_t>(bytes[dOfs + packetLength - 2U])) << 8));
                 const uint16_t packetCRC = static_cast<uint16_t>(static_cast<uint8_t>(bytes[dOfs + packetLength]))
                     | (static_cast<uint16_t>(static_cast<uint8_t>(bytes[dOfs + packetLength + 1U])) << 8);
+
+                if (trace)
+                {
+                    trace->calculatedCRC = crc;
+                    trace->receivedCRC = packetCRC;
+                }
 
                 payloadCRCStatus = (crc == packetCRC);
             }
@@ -389,11 +418,28 @@ void MeshtasticDemodDecoderLoRa::decodeBytes(
         {
             if ((packetLength >= 2U) && ((packetLength + 2U) <= bytes.size()))
             {
+                if (trace)
+                {
+                    trace->payloadCRCComputed = true;
+                    trace->crcDataOffset = 0U;
+                    trace->crc16ByteCount = packetLength - 2U;
+                    trace->crcTailByte0Offset = packetLength - 2U;
+                    trace->crcTailByte1Offset = packetLength - 1U;
+                    trace->receivedCRCOffset = packetLength;
+                }
+
                 uint16_t crc = crc16gr(bytes.data(), packetLength - 2U);
                 crc = static_cast<uint16_t>(crc ^ static_cast<uint8_t>(bytes[packetLength - 1U]));
                 crc = static_cast<uint16_t>(crc ^ (static_cast<uint16_t>(static_cast<uint8_t>(bytes[packetLength - 2U])) << 8));
                 const uint16_t packetCRC = static_cast<uint16_t>(static_cast<uint8_t>(bytes[packetLength]))
                     | (static_cast<uint16_t>(static_cast<uint8_t>(bytes[packetLength + 1U])) << 8);
+
+                if (trace)
+                {
+                    trace->calculatedCRC = crc;
+                    trace->receivedCRC = packetCRC;
+                }
+
                 payloadCRCStatus = (crc == packetCRC);
             }
             else
@@ -427,9 +473,14 @@ void MeshtasticDemodDecoderLoRa::decodeBytesSoft(
         int& headerParityStatus,
         bool& headerCRCStatus,
         int& payloadParityStatus,
-        bool& payloadCRCStatus
+        bool& payloadCRCStatus,
+        DecodeTrace *trace
 )
 {
+    if (trace) {
+        *trace = DecodeTrace();
+    }
+
     payloadCRCStatus = false;
     payloadParityStatus = (int) MeshtasticDemodSettings::ParityUndefined;
     bool error = false; // set if any payload codeword requires soft FEC correction
@@ -452,6 +503,10 @@ void MeshtasticDemodDecoderLoRa::decodeBytesSoft(
             earlyEOM = true;
             headerCRCStatus = false;
             return;
+        }
+
+        if (trace) {
+            trace->headerCRCComputed = true;
         }
 
         decodeHeader(
@@ -680,15 +735,36 @@ void MeshtasticDemodDecoderLoRa::decodeBytesSoft(
         payloadParityStatus = (int) MeshtasticDemodSettings::ParityOK;
     }
 
+    if (trace) {
+        trace->payloadDecodeCompleted = true;
+    }
+
     if (hasCRC)
     {
         if ((packetLength >= 2U) && (dataByteLen >= packetLength + 2U))
         {
+            if (trace)
+            {
+                trace->payloadCRCComputed = true;
+                trace->crcDataOffset = 0U;
+                trace->crc16ByteCount = packetLength - 2U;
+                trace->crcTailByte0Offset = packetLength - 2U;
+                trace->crcTailByte1Offset = packetLength - 1U;
+                trace->receivedCRCOffset = packetLength;
+            }
+
             uint16_t crc = crc16gr(bytes.data(), packetLength - 2U);
             crc = static_cast<uint16_t>(crc ^ bytes[packetLength - 1U]);
             crc = static_cast<uint16_t>(crc ^ (static_cast<uint16_t>(bytes[packetLength - 2U]) << 8));
             const uint16_t packetCRC = static_cast<uint16_t>(bytes[packetLength])
                 | (static_cast<uint16_t>(bytes[packetLength + 1U]) << 8);
+
+            if (trace)
+            {
+                trace->calculatedCRC = crc;
+                trace->receivedCRC = packetCRC;
+            }
+
             payloadCRCStatus = (crc == packetCRC);
         }
         else
