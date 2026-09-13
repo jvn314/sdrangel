@@ -286,6 +286,48 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             && (m_spreadFactor >= 5U)
             && (m_loRaBandwidth > 0U);
 
+        std::vector<int> headerRawResidues;
+        std::vector<unsigned short> headerDecodedSymbols;
+        unsigned int headerRawResidueModulus = 0U;
+        bool headerRawResidueModulusConsistent = true;
+
+        for (const MeshtasticDemodMsg::SymbolMappingDiagnostic& diagnostic : msg.getSymbolMappingDiagnostics())
+        {
+            if (!diagnostic.headerSymbol || (headerRawResidues.size() >= 8U)) {
+                continue;
+            }
+
+            const unsigned int modulus = std::max(1U, diagnostic.spread);
+
+            if (headerRawResidues.empty()) {
+                headerRawResidueModulus = modulus;
+            } else if (headerRawResidueModulus != modulus) {
+                headerRawResidueModulusConsistent = false;
+            }
+
+            headerRawResidues.push_back(static_cast<int>(diagnostic.rawSymbol % modulus));
+            headerDecodedSymbols.push_back(static_cast<unsigned short>(diagnostic.decoderSymbol));
+        }
+
+        if (!headerRawResidueModulusConsistent) {
+            headerRawResidueModulus = 0U;
+        }
+
+        int headerRawResidueMode = -1;
+        unsigned int headerRawResidueModeCount = 0U;
+
+        for (int residue : headerRawResidues)
+        {
+            const unsigned int count = static_cast<unsigned int>(
+                std::count(headerRawResidues.begin(), headerRawResidues.end(), residue));
+
+            if (count > headerRawResidueModeCount)
+            {
+                headerRawResidueModeCount = count;
+                headerRawResidueMode = residue;
+            }
+        }
+
         struct LoRaDecodeState
         {
             QByteArray bytes;
@@ -317,35 +359,137 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             return s;
         };
 
-        auto restoreLoRaState = [this, &msgBytes](const LoRaDecodeState& s) {
-            msgBytes = s.bytes;
-            m_hasCRC = s.hasCRC;
-            m_nbParityBits = s.nbParityBits;
-            m_packetLength = s.packetLength;
-            m_nbSymbols = s.nbSymbols;
-            m_nbCodewords = s.nbCodewords;
-            m_earlyEOM = s.earlyEOM;
-            m_headerParityStatus = s.headerParityStatus;
-            m_headerCRCStatus = s.headerCRCStatus;
-            m_payloadParityStatus = s.payloadParityStatus;
-            m_payloadCRCStatus = s.payloadCRCStatus;
+        auto restoreLoRaState = [this, &msgBytes](const LoRaDecodeState& state) {
+            msgBytes = state.bytes;
+            m_hasCRC = state.hasCRC;
+            m_nbParityBits = state.nbParityBits;
+            m_packetLength = state.packetLength;
+            m_nbSymbols = state.nbSymbols;
+            m_nbCodewords = state.nbCodewords;
+            m_earlyEOM = state.earlyEOM;
+            m_headerParityStatus = state.headerParityStatus;
+            m_headerCRCStatus = state.headerCRCStatus;
+            m_payloadParityStatus = state.payloadParityStatus;
+            m_payloadCRCStatus = state.payloadCRCStatus;
         };
 
-        QString decodePath = "failed";
+        auto decodeSymbolsWithTrace = [this](
+            const std::vector<unsigned short>& symbols,
+            QByteArray& bytes,
+            MeshtasticDemodDecoderLoRa::DecodeTrace& trace)
+        {
+            trace = MeshtasticDemodDecoderLoRa::DecodeTrace();
+
+            if (m_nbSymbolBits >= 5)
+            {
+                const unsigned int headerNbSymbolBits =
+                    (m_hasHeader && (m_spreadFactor > 2U))
+                        ? (m_spreadFactor - 2U)
+                        : m_nbSymbolBits;
+
+                MeshtasticDemodDecoderLoRa::decodeBytes(
+                    bytes,
+                    symbols,
+                    m_nbSymbolBits,
+                    headerNbSymbolBits,
+                    m_hasHeader,
+                    m_hasCRC,
+                    m_nbParityBits,
+                    m_packetLength,
+                    m_earlyEOM,
+                    m_headerParityStatus,
+                    m_headerCRCStatus,
+                    m_payloadParityStatus,
+                    m_payloadCRCStatus,
+                    &trace
+                );
+
+                MeshtasticDemodDecoderLoRa::getCodingMetrics(
+                    m_nbSymbolBits,
+                    headerNbSymbolBits,
+                    m_nbParityBits,
+                    m_packetLength,
+                    m_hasHeader,
+                    m_hasCRC,
+                    m_nbSymbols,
+                    m_nbCodewords
+                );
+            }
+        };
+
+        auto makeAttempt = [](const QString& id, int headerDelta, int payloadDelta) {
+            MeshtasticDemodMsg::DecodeAttemptDiagnostic attempt;
+            attempt.attemptId = id;
+            attempt.headerDelta = headerDelta;
+            attempt.payloadDelta = payloadDelta;
+            attempt.stopReason = QStringLiteral("not_candidate");
+            return attempt;
+        };
+
+        auto populateAttempt = [](
+            MeshtasticDemodMsg::DecodeAttemptDiagnostic& attempt,
+            const LoRaDecodeState& state,
+            const MeshtasticDemodDecoderLoRa::DecodeTrace& trace)
+        {
+            attempt.executed = true;
+            attempt.headerCRCComputed = trace.headerCRCComputed;
+            attempt.headerCRCStatus = state.headerCRCStatus;
+            attempt.hasCRC = state.hasCRC;
+            attempt.packetLength = state.packetLength;
+            attempt.nbParityBits = state.nbParityBits;
+            attempt.earlyEOM = state.earlyEOM;
+            attempt.payloadDecodeCompleted = trace.payloadDecodeCompleted;
+            attempt.payloadParityStatus = state.payloadParityStatus;
+            attempt.payloadCRCComputed = trace.payloadCRCComputed;
+            attempt.payloadCRCStatus = state.payloadCRCStatus;
+            attempt.crcDataOffset = trace.crcDataOffset;
+            attempt.crc16ByteCount = trace.crc16ByteCount;
+            attempt.crcTailByte0Offset = trace.crcTailByte0Offset;
+            attempt.crcTailByte1Offset = trace.crcTailByte1Offset;
+            attempt.receivedCRCOffset = trace.receivedCRCOffset;
+            attempt.calculatedCRC = trace.calculatedCRC;
+            attempt.receivedCRC = trace.receivedCRC;
+            attempt.bytes = state.bytes;
+
+            if (trace.headerCRCComputed && !state.headerCRCStatus) {
+                attempt.stopReason = QStringLiteral("header_crc_fail");
+            } else if (state.earlyEOM) {
+                attempt.stopReason = QStringLiteral("early_eom");
+            } else if (!state.hasCRC) {
+                attempt.stopReason = QStringLiteral("no_payload_crc");
+            } else if (trace.payloadCRCComputed && state.payloadCRCStatus) {
+                attempt.stopReason = QStringLiteral("payload_crc_pass");
+            } else if (trace.payloadCRCComputed) {
+                attempt.stopReason = QStringLiteral("payload_crc_fail");
+            } else {
+                attempt.stopReason = QStringLiteral("early_eom");
+            }
+        };
+
+        QString decodePath = QStringLiteral("failed");
         QByteArray decodeSoftBytes;
         QByteArray decodeHardBytes;
         QByteArray decodeMinus1Bytes;
         QByteArray decodePlus1Bytes;
 
+        MeshtasticDemodMsg::DecodeAttemptDiagnostic baseSoftAttempt =
+            makeAttempt(QStringLiteral("base_soft"), 0, 0);
+        MeshtasticDemodMsg::DecodeAttemptDiagnostic baseHardAttempt =
+            makeAttempt(QStringLiteral("base_hard"), 0, 0);
+        MeshtasticDemodMsg::DecodeAttemptDiagnostic wholeMinus1Attempt =
+            makeAttempt(QStringLiteral("whole_minus1"), -1, -1);
+        MeshtasticDemodMsg::DecodeAttemptDiagnostic wholePlus1Attempt =
+            makeAttempt(QStringLiteral("whole_plus1"), 1, 1);
+        MeshtasticDemodMsg::DecodeAttemptDiagnostic splitR2Attempt =
+            makeAttempt(QStringLiteral("split_r2"), 0, -1);
+
         if (canSoftDecode)
         {
-            unsigned int headerNbSymbolBits;
-
-            if (m_hasHeader && (m_spreadFactor > 2U)) {
-                headerNbSymbolBits = m_spreadFactor - 2U;
-            } else {
-                headerNbSymbolBits = m_nbSymbolBits;
-            }
+            const unsigned int headerNbSymbolBits =
+                (m_hasHeader && (m_spreadFactor > 2U))
+                    ? (m_spreadFactor - 2U)
+                    : m_nbSymbolBits;
+            MeshtasticDemodDecoderLoRa::DecodeTrace softTrace;
 
             MeshtasticDemodDecoderLoRa::decodeBytesSoft(
                 msgBytes,
@@ -363,7 +507,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 m_headerParityStatus,
                 m_headerCRCStatus,
                 m_payloadParityStatus,
-                m_payloadCRCStatus
+                m_payloadCRCStatus,
+                &softTrace
             );
 
             MeshtasticDemodDecoderLoRa::getCodingMetrics(
@@ -379,41 +524,52 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
             const LoRaDecodeState softState = captureLoRaState(msgBytes);
             decodeSoftBytes = softState.bytes;
+            populateAttempt(baseSoftAttempt, softState, softTrace);
 
-            // Soft path is canonical for gr-lora_sdr, but if this approximation misses CRC
-            // on noisy captures, retry hard decode once and keep whichever path validates.
             if (m_hasCRC && !m_payloadCRCStatus)
             {
                 QByteArray hardBytes;
-                decodeSymbols(msg.getSymbols(), hardBytes); // hard path updates decoder state
+                MeshtasticDemodDecoderLoRa::DecodeTrace hardTrace;
+                decodeSymbolsWithTrace(msg.getSymbols(), hardBytes, hardTrace);
                 const LoRaDecodeState hardState = captureLoRaState(hardBytes);
                 decodeHardBytes = hardState.bytes;
+                populateAttempt(baseHardAttempt, hardState, hardTrace);
 
                 if (hardState.payloadCRCStatus) {
                     restoreLoRaState(hardState);
-                    decodePath = "hard";
+                    decodePath = QStringLiteral("hard");
                 } else {
                     restoreLoRaState(softState);
                 }
             }
             else if (m_payloadCRCStatus)
             {
-                decodePath = "soft";
+                decodePath = QStringLiteral("soft");
             }
         }
         else
         {
-            decodeSymbols(msg.getSymbols(), msgBytes);
-            decodeHardBytes = msgBytes;
-            if (m_payloadCRCStatus)
-            {
-                decodePath = "hard";
+            QByteArray hardBytes;
+            MeshtasticDemodDecoderLoRa::DecodeTrace hardTrace;
+            decodeSymbolsWithTrace(msg.getSymbols(), hardBytes, hardTrace);
+            const LoRaDecodeState hardState = captureLoRaState(hardBytes);
+            decodeHardBytes = hardState.bytes;
+            populateAttempt(baseHardAttempt, hardState, hardTrace);
+            msgBytes = hardState.bytes;
+
+            if (m_payloadCRCStatus) {
+                decodePath = QStringLiteral("hard");
             }
         }
 
-        if (m_hasCRC && !m_payloadCRCStatus && (m_spreadFactor >= 5U))
+        const LoRaDecodeState preRetryState = captureLoRaState(msgBytes);
+        const bool wholeRetryGateOpen =
+            preRetryState.hasCRC
+            && !preRetryState.payloadCRCStatus
+            && (m_spreadFactor >= 5U);
+
+        if (wholeRetryGateOpen)
         {
-            const LoRaDecodeState baseState = captureLoRaState(msgBytes);
             const unsigned int headerNbSymbolBits = (m_hasHeader && (m_spreadFactor > 2U))
                 ? (m_spreadFactor - 2U)
                 : m_nbSymbolBits;
@@ -421,6 +577,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
             for (int delta : {-1, 1})
             {
+                MeshtasticDemodMsg::DecodeAttemptDiagnostic& attempt =
+                    (delta == -1) ? wholeMinus1Attempt : wholePlus1Attempt;
                 std::vector<unsigned short> shifted = msg.getSymbols();
 
                 for (size_t i = 0; i < shifted.size(); i++)
@@ -428,14 +586,17 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     const bool isHeader = m_hasHeader && (i < 8U);
                     const unsigned int bits = isHeader ? headerNbSymbolBits : m_nbSymbolBits;
                     const unsigned int mod = 1U << std::max(1U, bits);
-                    const int s = static_cast<int>(shifted[i]);
-                    const int v = (s + delta) % static_cast<int>(mod);
-                    shifted[i] = static_cast<unsigned short>(v < 0 ? (v + static_cast<int>(mod)) : v);
+                    const int symbol = static_cast<int>(shifted[i]);
+                    const int shiftedSymbol = (symbol + delta) % static_cast<int>(mod);
+                    shifted[i] = static_cast<unsigned short>(
+                        shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(mod) : shiftedSymbol);
                 }
 
                 QByteArray shiftedBytes;
-                decodeSymbols(shifted, shiftedBytes); // hard-path decode with adjusted symbol indices
+                MeshtasticDemodDecoderLoRa::DecodeTrace shiftedTrace;
+                decodeSymbolsWithTrace(shifted, shiftedBytes, shiftedTrace);
                 const LoRaDecodeState shiftedState = captureLoRaState(shiftedBytes);
+                populateAttempt(attempt, shiftedState, shiftedTrace);
 
                 if (delta == -1) {
                     decodeMinus1Bytes = shiftedState.bytes;
@@ -446,16 +607,72 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 if (shiftedState.payloadCRCStatus)
                 {
                     restoreLoRaState(shiftedState);
-                    decodePath = (delta == -1) ? "minus1_bin" : "plus1_bin";
+                    decodePath = (delta == -1)
+                        ? QStringLiteral("minus1_bin")
+                        : QStringLiteral("plus1_bin");
                     recovered = true;
+
+                    if (delta == -1) {
+                        wholePlus1Attempt.stopReason = QStringLiteral("prior_attempt_passed");
+                    }
+
                     break;
                 }
             }
 
             if (!recovered) {
-                restoreLoRaState(baseState);
+                restoreLoRaState(preRetryState);
             }
         }
+        else
+        {
+            QString gateReason = QStringLiteral("not_candidate");
+
+            if (!preRetryState.payloadCRCStatus
+                && (m_spreadFactor >= 5U)
+                && !preRetryState.hasCRC) {
+                gateReason = QStringLiteral("gate_closed");
+            }
+
+            wholeMinus1Attempt.stopReason = gateReason;
+            wholePlus1Attempt.stopReason = gateReason;
+        }
+
+        const bool splitR2Candidate =
+            (decodePath == QStringLiteral("failed"))
+            && (headerRawResidues.size() == 8U)
+            && (headerRawResidueModulus == 4U)
+            && (headerRawResidueMode == 2);
+
+        if (splitR2Candidate)
+        {
+            const LoRaDecodeState acceptedState = captureLoRaState(msgBytes);
+            std::vector<unsigned short> shifted = msg.getSymbols();
+            const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
+
+            for (size_t i = 8U; i < shifted.size(); i++)
+            {
+                const int symbol = static_cast<int>(shifted[i]);
+                const int shiftedSymbol = (symbol - 1) % static_cast<int>(payloadMod);
+                shifted[i] = static_cast<unsigned short>(
+                    shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(payloadMod) : shiftedSymbol);
+            }
+
+            QByteArray splitBytes;
+            MeshtasticDemodDecoderLoRa::DecodeTrace splitTrace;
+            decodeSymbolsWithTrace(shifted, splitBytes, splitTrace);
+            const LoRaDecodeState splitState = captureLoRaState(splitBytes);
+            populateAttempt(splitR2Attempt, splitState, splitTrace);
+            restoreLoRaState(acceptedState);
+        }
+
+        std::vector<MeshtasticDemodMsg::DecodeAttemptDiagnostic> decodeAttemptDiagnostics {
+            baseSoftAttempt,
+            baseHardAttempt,
+            wholeMinus1Attempt,
+            wholePlus1Attempt,
+            splitR2Attempt
+        };
 
         qDebug(
             "MeshtasticDemodDecoder::handleMessage: decode symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d",
@@ -494,6 +711,17 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             {
                 outputMsg->setFftPeakDiagnostics(fftPeakDiagnostics);
                 outputMsg->setSymbolMappingDiagnostics(msg.getSymbolMappingDiagnostics());
+                outputMsg->setDecodeAttemptDiagnostics(decodeAttemptDiagnostics);
+                outputMsg->setHeaderRawResidueMetadata(
+                    headerRawResidues,
+                    headerDecodedSymbols,
+                    headerRawResidueModulus,
+                    headerRawResidueMode
+                );
+                outputMsg->setBaseRetryGateState(
+                    preRetryState.hasCRC,
+                    preRetryState.headerCRCStatus
+                );
             }
             outputMsg->setHeaderLockDiagnostic(
                 msg.getHeaderLockDiagnosticValid(),
