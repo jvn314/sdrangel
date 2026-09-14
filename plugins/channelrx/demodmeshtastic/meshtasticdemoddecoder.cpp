@@ -675,8 +675,63 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         }
 
         const LoRaDecodeState preRetryState = captureLoRaState(msgBytes);
+        const bool headerRawResidueUniform =
+            (headerRawResidues.size() == 8U)
+            && std::all_of(
+                headerRawResidues.begin() + 1,
+                headerRawResidues.end(),
+                [&](int residue) { return residue == headerRawResidues.front(); });
+        const bool rawResidue2 =
+            headerRawResidueUniform
+            && (headerRawResidueModulus == 4U)
+            && (headerRawResidueMode == 2);
+
+        bool splitR2Recovered = false;
+
+        // DECODER BEHAVIOR CHANGE: promote the measured raw-residue-2 recovery
+        // from diagnostic-only to production. Keep the validated base header
+        // unchanged and shift only payload symbols by -1 before CRC acceptance.
+        if (rawResidue2
+            && preRetryState.headerCRCStatus
+            && preRetryState.hasCRC
+            && !preRetryState.payloadCRCStatus
+            && (m_spreadFactor >= 5U))
+        {
+            std::vector<unsigned short> shifted = msg.getSymbols();
+            const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
+
+            for (size_t i = 8U; i < shifted.size(); ++i)
+            {
+                const int symbol = static_cast<int>(shifted[i]);
+                const int shiftedSymbol = (symbol - 1) % static_cast<int>(payloadMod);
+                shifted[i] = static_cast<unsigned short>(
+                    shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(payloadMod) : shiftedSymbol);
+            }
+
+            QByteArray splitBytes;
+            MeshtasticDemodDecoderLoRa::DecodeTrace splitTrace;
+            decodeSymbolsWithTrace(shifted, splitBytes, splitTrace);
+            const LoRaDecodeState splitState = captureLoRaState(splitBytes);
+            populateAttempt(splitR2Attempt, splitState, splitTrace);
+
+            if (splitState.headerCRCStatus
+                && splitState.hasCRC
+                && splitTrace.payloadCRCComputed
+                && splitState.payloadCRCStatus)
+            {
+                restoreLoRaState(splitState);
+                decodePath = QStringLiteral("split_r2");
+                splitR2Recovered = true;
+            }
+            else
+            {
+                restoreLoRaState(preRetryState);
+            }
+        }
+
         const bool wholeRetryGateOpen =
-            preRetryState.hasCRC
+            !splitR2Recovered
+            && preRetryState.hasCRC
             && !preRetryState.payloadCRCStatus
             && (m_spreadFactor >= 5U);
 
@@ -813,26 +868,29 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             runWholeShiftDiagnostic(-1, wholeMinus1Attempt, decodeMinus1Bytes);
             runWholeShiftDiagnostic(1, wholePlus1Attempt, decodePlus1Bytes);
 
-            // split_r2 is always a diagnostic control here: leave the explicit
-            // header unchanged and shift payload symbols by -1.
-            restoreLoRaState(acceptedState);
-            std::vector<unsigned short> shifted = msg.getSymbols();
-            const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
-
-            for (size_t i = 8U; i < shifted.size(); ++i)
+            // If production did not run split_r2, retain the unconditional
+            // diagnostic control so cross-residue specificity remains measured.
+            if (!splitR2Attempt.executed)
             {
-                const int symbol = static_cast<int>(shifted[i]);
-                const int shiftedSymbol = (symbol - 1) % static_cast<int>(payloadMod);
-                shifted[i] = static_cast<unsigned short>(
-                    shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(payloadMod) : shiftedSymbol);
-            }
+                restoreLoRaState(acceptedState);
+                std::vector<unsigned short> shifted = msg.getSymbols();
+                const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
 
-            QByteArray splitBytes;
-            MeshtasticDemodDecoderLoRa::DecodeTrace splitTrace;
-            decodeSymbolsWithTrace(shifted, splitBytes, splitTrace);
-            const LoRaDecodeState splitState = captureLoRaState(splitBytes);
-            populateAttempt(splitR2Attempt, splitState, splitTrace);
-            restoreLoRaState(acceptedState);
+                for (size_t i = 8U; i < shifted.size(); ++i)
+                {
+                    const int symbol = static_cast<int>(shifted[i]);
+                    const int shiftedSymbol = (symbol - 1) % static_cast<int>(payloadMod);
+                    shifted[i] = static_cast<unsigned short>(
+                        shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(payloadMod) : shiftedSymbol);
+                }
+
+                QByteArray splitBytes;
+                MeshtasticDemodDecoderLoRa::DecodeTrace splitTrace;
+                decodeSymbolsWithTrace(shifted, splitBytes, splitTrace);
+                const LoRaDecodeState splitState = captureLoRaState(splitBytes);
+                populateAttempt(splitR2Attempt, splitState, splitTrace);
+                restoreLoRaState(acceptedState);
+            }
         }
         else
         {
@@ -936,6 +994,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 && !preRetryState.hasCRC;
             const bool verboseDecoderDiagnostics =
                 (decodePath == QStringLiteral("failed"))
+                || (decodePath == QStringLiteral("split_r2"))
                 || (decodePath == QStringLiteral("minus1_bin"))
                 || (decodePath == QStringLiteral("plus1_bin"))
                 || splitUnexpectedPass
