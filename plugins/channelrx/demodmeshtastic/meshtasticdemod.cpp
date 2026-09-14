@@ -639,7 +639,16 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
     lora["decode_path"] = msg.getDecodePath();
-    lora["candidate_id"] = msg.getDecodePath();
+
+    const bool acceptedCandidate =
+        (msg.getDecodePath() == QStringLiteral("soft"))
+        || (msg.getDecodePath() == QStringLiteral("hard"))
+        || (msg.getDecodePath() == QStringLiteral("split_r2"))
+        || (msg.getDecodePath() == QStringLiteral("plus1_bin"))
+        || (msg.getDecodePath() == QStringLiteral("minus1_bin"));
+    lora["candidate_id"] = acceptedCandidate
+        ? msg.getDecodePath()
+        : QStringLiteral("NONE");
 
     if ((msg.getDecodePath() == QStringLiteral("plus1_bin"))
         || (msg.getDecodePath() == QStringLiteral("minus1_bin"))) {
