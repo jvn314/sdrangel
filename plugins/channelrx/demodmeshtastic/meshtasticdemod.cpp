@@ -648,6 +648,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         || (msg.getDecodePath() == QStringLiteral("hard"))
         || (msg.getDecodePath() == QStringLiteral("split_r2"))) {
         lora["header_source"] = QStringLiteral("BASE_VALIDATED");
+    } else {
+        lora["header_source"] = QStringLiteral("NONE");
     }
 
     if (msg.getHeaderLockDiagnosticValid())
