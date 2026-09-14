@@ -773,7 +773,14 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     decodePlus1Bytes = shiftedState.bytes;
                 }
 
-                if (shiftedState.payloadCRCStatus)
+                // DECODER BEHAVIOR CHANGE: whole-shift candidates re-decode the
+                // header, so acceptance now requires that fresh header to validate
+                // and assert CRC-present before a computed payload CRC may accept it.
+                if (shiftedTrace.headerCRCComputed
+                    && shiftedState.headerCRCStatus
+                    && shiftedState.hasCRC
+                    && shiftedTrace.payloadCRCComputed
+                    && shiftedState.payloadCRCStatus)
                 {
                     restoreLoRaState(shiftedState);
                     decodePath = (delta == -1)
