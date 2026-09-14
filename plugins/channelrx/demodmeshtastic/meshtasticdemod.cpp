@@ -583,6 +583,31 @@ double diagnosticValue(double value)
     return std::round(value * 1000.0) / 1000.0;
 }
 
+bool isAcceptedDecodePath(const QString& path)
+{
+    return (path == QStringLiteral("soft"))
+        || (path == QStringLiteral("hard"))
+        || (path == QStringLiteral("split_r2"))
+        || (path == QStringLiteral("plus1_bin"))
+        || (path == QStringLiteral("minus1_bin"));
+}
+
+QString headerSourceForDecodePath(const QString& path)
+{
+    if ((path == QStringLiteral("plus1_bin"))
+        || (path == QStringLiteral("minus1_bin"))) {
+        return QStringLiteral("REDECODED");
+    }
+
+    if ((path == QStringLiteral("soft"))
+        || (path == QStringLiteral("hard"))
+        || (path == QStringLiteral("split_r2"))) {
+        return QStringLiteral("BASE_VALIDATED");
+    }
+
+    return QStringLiteral("NONE");
+}
+
 } // namespace
 
 QString MeshtasticDemod::buildMeshtasticJsonPacket(
@@ -638,28 +663,12 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["fft_margin_avg_db"] = diagnosticValue(msg.getFftMarginAvgDb());
     lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
-    lora["decode_path"] = msg.getDecodePath();
-
-    const bool acceptedCandidate =
-        (msg.getDecodePath() == QStringLiteral("soft"))
-        || (msg.getDecodePath() == QStringLiteral("hard"))
-        || (msg.getDecodePath() == QStringLiteral("split_r2"))
-        || (msg.getDecodePath() == QStringLiteral("plus1_bin"))
-        || (msg.getDecodePath() == QStringLiteral("minus1_bin"));
-    lora["candidate_id"] = acceptedCandidate
-        ? msg.getDecodePath()
+    const QString decodePath = msg.getDecodePath();
+    lora["decode_path"] = decodePath;
+    lora["candidate_id"] = isAcceptedDecodePath(decodePath)
+        ? decodePath
         : QStringLiteral("NONE");
-
-    if ((msg.getDecodePath() == QStringLiteral("plus1_bin"))
-        || (msg.getDecodePath() == QStringLiteral("minus1_bin"))) {
-        lora["header_source"] = QStringLiteral("REDECODED");
-    } else if ((msg.getDecodePath() == QStringLiteral("soft"))
-        || (msg.getDecodePath() == QStringLiteral("hard"))
-        || (msg.getDecodePath() == QStringLiteral("split_r2"))) {
-        lora["header_source"] = QStringLiteral("BASE_VALIDATED");
-    } else {
-        lora["header_source"] = QStringLiteral("NONE");
-    }
+    lora["header_source"] = headerSourceForDecodePath(decodePath);
 
     if (msg.getHeaderLockDiagnosticValid())
     {
