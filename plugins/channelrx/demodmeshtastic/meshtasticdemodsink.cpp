@@ -1179,6 +1179,26 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
     m_decodeMsg->pushBackSymbol(symbol);
     m_decodeMsg->pushBackMagnitudes(symbolMags);
 
+    // Diagnostic only: characterize short impulsive energy inside this symbol.
+    // These values are not used by synchronization or decoding.
+    double diagnosticSamplePowerSum = 0.0;
+    double diagnosticSamplePeakPower = 0.0;
+
+    for (const Complex& sample : m_loRaInDown)
+    {
+        const double power = std::norm(sample);
+        diagnosticSamplePowerSum += power;
+        diagnosticSamplePeakPower = std::max(diagnosticSamplePeakPower, power);
+    }
+
+    const double diagnosticSampleMeanPower = m_loRaInDown.empty()
+        ? 0.0
+        : diagnosticSamplePowerSum / static_cast<double>(m_loRaInDown.size());
+    m_decodeMsg->pushBackTransientDiagnostic(
+        static_cast<float>(diagnosticSamplePeakPower),
+        static_cast<float>(diagnosticSampleMeanPower)
+    );
+
     unsigned int symbolSpread = m_fftInterpolation * (1U << m_settings.m_deBits);
     const unsigned int symbolBins = m_fftInterpolation * m_nbSymbols;
 

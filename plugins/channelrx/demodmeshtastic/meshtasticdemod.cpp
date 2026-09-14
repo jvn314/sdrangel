@@ -660,6 +660,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
             symbolPeak.append(peak.secondOffset);
             symbolPeak.append(diagnosticValue(peak.bestPower));
             symbolPeak.append(diagnosticValue(peak.secondPower));
+            symbolPeak.append(diagnosticValue(peak.totalPower));
+            symbolPeak.append(diagnosticValue(peak.bestFraction));
             symbolPeak.append(diagnosticValue(peak.sfoCumBefore));
             symbolPeak.append(peak.timingStepAfterSymbol);
             fftPeaks.append(symbolPeak);
@@ -667,7 +669,33 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
 
         lora["fft_peaks"] = fftPeaks;
         lora["fft_peaks_format"] = QStringLiteral(
-            "[best_bin,second_bin,second_offset,best_power,second_power,sfo_cum_before,timing_step_after_symbol]"
+            "[best_bin,second_bin,second_offset,best_power,second_power,total_power,best_fraction,sfo_cum_before,timing_step_after_symbol]"
+        );
+    }
+
+    if (!msg.getTransientDiagnostics().empty())
+    {
+        QJsonArray transientSymbols;
+
+        for (const MeshtasticDemodMsg::SymbolTransientDiagnostic& diagnostic : msg.getTransientDiagnostics())
+        {
+            QJsonArray symbolTransient;
+            symbolTransient.append(diagnosticValue(diagnostic.peakPower));
+            symbolTransient.append(diagnosticValue(diagnostic.meanPower));
+
+            if ((diagnostic.peakPower > 0.0f) && (diagnostic.meanPower > 0.0f)) {
+                symbolTransient.append(diagnosticValue(
+                    10.0 * std::log10(diagnostic.peakPower / diagnostic.meanPower)));
+            } else {
+                symbolTransient.append(0.0);
+            }
+
+            transientSymbols.append(symbolTransient);
+        }
+
+        lora["transient_symbols"] = transientSymbols;
+        lora["transient_symbols_format"] = QStringLiteral(
+            "[sample_peak_power,sample_mean_power,peak_to_rms_db]"
         );
     }
 
@@ -713,8 +741,18 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         QJsonObject packetMetadata;
         packetMetadata["base_has_crc"] = msg.getBaseHasCRC();
         packetMetadata["base_header_crc_passed"] = msg.getBaseHeaderCRCStatus();
+        packetMetadata["production_whole_retry_gate_open"] = msg.getProductionWholeRetryGateOpen();
         packetMetadata["header_raw_residue_modulus"] = static_cast<int>(msg.getHeaderRawResidueModulus());
         packetMetadata["header_raw_residue_mode"] = msg.getHeaderRawResidueMode();
+
+        const std::vector<int>& residueVector = msg.getHeaderRawResidues();
+        const bool residueUniform =
+            (residueVector.size() == 8U)
+            && std::all_of(
+                residueVector.begin() + 1,
+                residueVector.end(),
+                [&](int residue) { return residue == residueVector.front(); });
+        packetMetadata["header_raw_residue_uniform"] = residueUniform;
 
         QJsonArray headerRawResidues;
         for (int residue : msg.getHeaderRawResidues()) {
@@ -728,6 +766,25 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         }
         packetMetadata["header_decoded_symbols"] = headerDecodedSymbols;
         decoderDiagnostics["packet_metadata"] = packetMetadata;
+        decoderDiagnostics["diagnostic_level"] = msg.getVerboseDecoderDiagnostics()
+            ? QStringLiteral("verbose")
+            : QStringLiteral("compact");
+
+        QJsonObject transientSummary;
+        transientSummary["fft_best_fraction_min"] = diagnosticValue(msg.getFftBestFractionMin());
+        transientSummary["fft_best_fraction_worst_symbol"] = msg.getFftBestFractionWorstSymbol();
+        transientSummary["fft_total_power_peak_to_median_db"] =
+            diagnosticValue(msg.getFftTotalPowerPeakToMedianDb());
+        transientSummary["fft_total_power_peak_symbol"] = msg.getFftTotalPowerPeakSymbol();
+        transientSummary["sample_peak_to_rms_max_db"] =
+            diagnosticValue(msg.getSamplePeakToRmsMaxDb());
+        transientSummary["sample_peak_to_rms_worst_symbol"] =
+            msg.getSamplePeakToRmsWorstSymbol();
+        transientSummary["sample_mean_power_peak_to_median_db"] =
+            diagnosticValue(msg.getSampleMeanPowerPeakToMedianDb());
+        transientSummary["sample_mean_power_peak_symbol"] =
+            msg.getSampleMeanPowerPeakSymbol();
+        decoderDiagnostics["transient_summary"] = transientSummary;
 
         QJsonArray attempts;
 
@@ -770,31 +827,42 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
 
                 if (diagnostic.payloadCRCComputed)
                 {
-                    attempt["crc_data_offset"] = static_cast<int>(diagnostic.crcDataOffset);
-                    attempt["crc16_byte_count"] = static_cast<int>(diagnostic.crc16ByteCount);
-                    attempt["crc_tail_byte0_offset"] = static_cast<int>(diagnostic.crcTailByte0Offset);
-                    attempt["crc_tail_byte1_offset"] = static_cast<int>(diagnostic.crcTailByte1Offset);
-                    attempt["received_crc_offset"] = static_cast<int>(diagnostic.receivedCRCOffset);
-                    attempt["calculated_crc"] = static_cast<int>(diagnostic.calculatedCRC);
-                    attempt["received_crc"] = static_cast<int>(diagnostic.receivedCRC);
                     attempt["crc_xor"] = static_cast<int>(
                         diagnostic.calculatedCRC ^ diagnostic.receivedCRC);
+
+                    if (msg.getVerboseDecoderDiagnostics())
+                    {
+                        attempt["crc_data_offset"] = static_cast<int>(diagnostic.crcDataOffset);
+                        attempt["crc16_byte_count"] = static_cast<int>(diagnostic.crc16ByteCount);
+                        attempt["crc_tail_byte0_offset"] = static_cast<int>(diagnostic.crcTailByte0Offset);
+                        attempt["crc_tail_byte1_offset"] = static_cast<int>(diagnostic.crcTailByte1Offset);
+                        attempt["received_crc_offset"] = static_cast<int>(diagnostic.receivedCRCOffset);
+                        attempt["calculated_crc"] = static_cast<int>(diagnostic.calculatedCRC);
+                        attempt["received_crc"] = static_cast<int>(diagnostic.receivedCRC);
+                    }
                 }
 
-                attempt["attempt_hex"] = QString(diagnostic.bytes.toHex());
+                if (msg.getVerboseDecoderDiagnostics()) {
+                    attempt["attempt_hex"] = QString(diagnostic.bytes.toHex());
+                }
             }
             else
             {
                 attempt["payload_fec"] = QStringLiteral("n/a");
                 attempt["payload_crc"] = QStringLiteral("n/a");
                 attempt["crc_values_valid"] = false;
-                attempt["attempt_hex"] = QString();
+
+                if (msg.getVerboseDecoderDiagnostics()) {
+                    attempt["attempt_hex"] = QString();
+                }
             }
 
             attempts.append(attempt);
         }
 
-        decoderDiagnostics["attempt_hex_format"] = QStringLiteral("wire_order_payload_bytes");
+        if (msg.getVerboseDecoderDiagnostics()) {
+            decoderDiagnostics["attempt_hex_format"] = QStringLiteral("wire_order_payload_bytes");
+        }
         decoderDiagnostics["attempts"] = attempts;
         lora["decoder_diagnostics"] = decoderDiagnostics;
     }

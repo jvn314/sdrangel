@@ -198,6 +198,10 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         unsigned int fftMarginLt3Db = 0U;
         std::vector<MeshtasticDemodMsg::FftPeakDiagnostic> fftPeakDiagnostics;
         fftPeakDiagnostics.reserve(msgMags.size());
+        std::vector<float> fftTotalPowers;
+        fftTotalPowers.reserve(msgMags.size());
+        float fftBestFractionMin = 1.0f;
+        int fftBestFractionWorstSymbol = -1;
 
         for (size_t symbolIndex = 0; symbolIndex < msgMags.size(); ++symbolIndex)
         {
@@ -209,12 +213,14 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
             float best = 0.0f;
             float secondBest = 0.0f;
+            float totalPower = 0.0f;
             int bestBin = -1;
             int secondBin = -1;
 
             for (size_t bin = 0; bin < mags.size(); ++bin)
             {
                 const float mag = mags[bin];
+                totalPower += std::max(0.0f, mag);
 
                 if (mag > best)
                 {
@@ -252,11 +258,22 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             peakDiagnostic.secondOffset = secondOffset;
             peakDiagnostic.bestPower = best;
             peakDiagnostic.secondPower = secondBest;
+            peakDiagnostic.totalPower = totalPower;
+            peakDiagnostic.bestFraction =
+                totalPower > 0.0f ? best / totalPower : 0.0f;
             peakDiagnostic.sfoCumBefore =
                 symbolIndex < msgSfoCumBefore.size() ? msgSfoCumBefore[symbolIndex] : 0.0f;
             peakDiagnostic.timingStepAfterSymbol =
                 symbolIndex < msgTimingStepAfterSymbol.size() ? msgTimingStepAfterSymbol[symbolIndex] : 0;
             fftPeakDiagnostics.push_back(peakDiagnostic);
+            fftTotalPowers.push_back(totalPower);
+
+            if ((fftBestFractionWorstSymbol < 0)
+                || (peakDiagnostic.bestFraction < fftBestFractionMin))
+            {
+                fftBestFractionMin = peakDiagnostic.bestFraction;
+                fftBestFractionWorstSymbol = static_cast<int>(symbolIndex);
+            }
 
             const float marginDb =
                 10.0f * std::log10(best / std::max(secondBest, 1.0e-30f));
@@ -281,6 +298,101 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             fftMarginCount > 0U
                 ? static_cast<float>(fftMarginSumDb / fftMarginCount)
                 : 0.0f;
+
+        auto medianPositive = [](const std::vector<float>& values) -> float
+        {
+            std::vector<float> positive;
+            positive.reserve(values.size());
+
+            for (float value : values)
+            {
+                if (value > 0.0f) {
+                    positive.push_back(value);
+                }
+            }
+
+            if (positive.empty()) {
+                return 0.0f;
+            }
+
+            std::sort(positive.begin(), positive.end());
+            const size_t middle = positive.size() / 2U;
+
+            if ((positive.size() & 1U) != 0U) {
+                return positive[middle];
+            }
+
+            return 0.5f * (positive[middle - 1U] + positive[middle]);
+        };
+
+        float fftTotalPowerPeakToMedianDb = 0.0f;
+        int fftTotalPowerPeakSymbol = -1;
+
+        if (!fftTotalPowers.empty())
+        {
+            const float median = medianPositive(fftTotalPowers);
+            const auto peakIt = std::max_element(fftTotalPowers.begin(), fftTotalPowers.end());
+
+            if (peakIt != fftTotalPowers.end())
+            {
+                fftTotalPowerPeakSymbol = static_cast<int>(
+                    std::distance(fftTotalPowers.begin(), peakIt));
+
+                if ((median > 0.0f) && (*peakIt > 0.0f)) {
+                    fftTotalPowerPeakToMedianDb =
+                        10.0f * std::log10(*peakIt / median);
+                }
+            }
+        }
+
+        float samplePeakToRmsMaxDb = 0.0f;
+        int samplePeakToRmsWorstSymbol = -1;
+        float sampleMeanPowerPeakToMedianDb = 0.0f;
+        int sampleMeanPowerPeakSymbol = -1;
+        std::vector<float> sampleMeanPowers;
+        sampleMeanPowers.reserve(msg.getTransientDiagnostics().size());
+
+        for (size_t i = 0; i < msg.getTransientDiagnostics().size(); ++i)
+        {
+            const MeshtasticDemodMsg::SymbolTransientDiagnostic& diagnostic =
+                msg.getTransientDiagnostics()[i];
+            sampleMeanPowers.push_back(diagnostic.meanPower);
+
+            if ((diagnostic.peakPower > 0.0f) && (diagnostic.meanPower > 0.0f))
+            {
+                const float peakToRmsDb =
+                    10.0f * std::log10(diagnostic.peakPower / diagnostic.meanPower);
+
+                if ((samplePeakToRmsWorstSymbol < 0)
+                    || (peakToRmsDb > samplePeakToRmsMaxDb))
+                {
+                    samplePeakToRmsMaxDb = peakToRmsDb;
+                    samplePeakToRmsWorstSymbol = static_cast<int>(i);
+                }
+            }
+        }
+
+        if (!sampleMeanPowers.empty())
+        {
+            const float median = medianPositive(sampleMeanPowers);
+            const auto peakIt = std::max_element(sampleMeanPowers.begin(), sampleMeanPowers.end());
+
+            if (peakIt != sampleMeanPowers.end())
+            {
+                sampleMeanPowerPeakSymbol = static_cast<int>(
+                    std::distance(sampleMeanPowers.begin(), peakIt));
+
+                if ((median > 0.0f) && (*peakIt > 0.0f)) {
+                    sampleMeanPowerPeakToMedianDb =
+                        10.0f * std::log10(*peakIt / median);
+                }
+            }
+        }
+
+        if (fftBestFractionWorstSymbol < 0) {
+            fftBestFractionMin = 0.0f;
+        }
+
         const bool canSoftDecode = !msgMags.empty()
             && (msgMags.size() >= msg.getSymbols().size())
             && (m_spreadFactor >= 5U)
@@ -638,19 +750,76 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             wholePlus1Attempt.stopReason = gateReason;
         }
 
-        const bool splitR2Candidate =
-            (decodePath == QStringLiteral("failed"))
-            && (headerRawResidues.size() == 8U)
-            && (headerRawResidueModulus == 4U)
-            && (headerRawResidueMode == 2);
+        // Everything below is diagnostic-only. Preserve the production-selected
+        // state and run missing alternatives without changing decodePath or output.
+        const LoRaDecodeState acceptedState = captureLoRaState(msgBytes);
+        const bool diagnosticEligible =
+            m_hasHeader
+            && (msg.getSymbols().size() >= 8U)
+            && (m_spreadFactor >= 5U);
 
-        if (splitR2Candidate)
+        if (diagnosticEligible)
         {
-            const LoRaDecodeState acceptedState = captureLoRaState(msgBytes);
+            if (!baseHardAttempt.executed)
+            {
+                restoreLoRaState(acceptedState);
+                QByteArray hardBytes;
+                MeshtasticDemodDecoderLoRa::DecodeTrace hardTrace;
+                decodeSymbolsWithTrace(msg.getSymbols(), hardBytes, hardTrace);
+                const LoRaDecodeState hardState = captureLoRaState(hardBytes);
+                decodeHardBytes = hardState.bytes;
+                populateAttempt(baseHardAttempt, hardState, hardTrace);
+                restoreLoRaState(acceptedState);
+            }
+
+            const unsigned int headerNbSymbolBits =
+                (m_hasHeader && (m_spreadFactor > 2U))
+                    ? (m_spreadFactor - 2U)
+                    : m_nbSymbolBits;
+
+            auto runWholeShiftDiagnostic = [&](int delta,
+                                               MeshtasticDemodMsg::DecodeAttemptDiagnostic& attempt,
+                                               QByteArray& diagnosticBytes)
+            {
+                if (attempt.executed) {
+                    return;
+                }
+
+                restoreLoRaState(acceptedState);
+                std::vector<unsigned short> shifted = msg.getSymbols();
+
+                for (size_t i = 0; i < shifted.size(); ++i)
+                {
+                    const bool isHeader = m_hasHeader && (i < 8U);
+                    const unsigned int bits = isHeader ? headerNbSymbolBits : m_nbSymbolBits;
+                    const unsigned int mod = 1U << std::max(1U, bits);
+                    const int symbol = static_cast<int>(shifted[i]);
+                    const int shiftedSymbol = (symbol + delta) % static_cast<int>(mod);
+                    shifted[i] = static_cast<unsigned short>(
+                        shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(mod) : shiftedSymbol);
+                }
+
+                QByteArray shiftedBytes;
+                MeshtasticDemodDecoderLoRa::DecodeTrace shiftedTrace;
+                decodeSymbolsWithTrace(shifted, shiftedBytes, shiftedTrace);
+                const LoRaDecodeState shiftedState = captureLoRaState(shiftedBytes);
+                diagnosticBytes = shiftedState.bytes;
+                populateAttempt(attempt, shiftedState, shiftedTrace);
+                restoreLoRaState(acceptedState);
+            };
+
+            // Run whichever whole-frame alternatives production did not execute.
+            // This explicitly measures gate-closed and prior-attempt-skipped cases.
+            runWholeShiftDiagnostic(-1, wholeMinus1Attempt, decodeMinus1Bytes);
+            runWholeShiftDiagnostic(1, wholePlus1Attempt, decodePlus1Bytes);
+
+            // split_r2 is always a diagnostic control here: leave the explicit
+            // header unchanged and shift payload symbols by -1.
+            restoreLoRaState(acceptedState);
             std::vector<unsigned short> shifted = msg.getSymbols();
             const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
 
-            for (size_t i = 8U; i < shifted.size(); i++)
+            for (size_t i = 8U; i < shifted.size(); ++i)
             {
                 const int symbol = static_cast<int>(shifted[i]);
                 const int shiftedSymbol = (symbol - 1) % static_cast<int>(payloadMod);
@@ -664,6 +833,19 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             const LoRaDecodeState splitState = captureLoRaState(splitBytes);
             populateAttempt(splitR2Attempt, splitState, splitTrace);
             restoreLoRaState(acceptedState);
+        }
+        else
+        {
+            if (!baseHardAttempt.executed) {
+                baseHardAttempt.stopReason = QStringLiteral("not_applicable");
+            }
+            if (!wholeMinus1Attempt.executed) {
+                wholeMinus1Attempt.stopReason = QStringLiteral("not_applicable");
+            }
+            if (!wholePlus1Attempt.executed) {
+                wholePlus1Attempt.stopReason = QStringLiteral("not_applicable");
+            }
+            splitR2Attempt.stopReason = QStringLiteral("not_applicable");
         }
 
         std::vector<MeshtasticDemodMsg::DecodeAttemptDiagnostic> decodeAttemptDiagnostics {
@@ -705,24 +887,70 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setFftMarginAvgDb(fftMarginAvgDb);
             outputMsg->setFftMarginLt1Db(fftMarginLt1Db);
             outputMsg->setFftMarginLt3Db(fftMarginLt3Db);
-            if ((decodePath == QStringLiteral("failed"))
+            outputMsg->setTransientSummary(
+                fftBestFractionMin,
+                fftBestFractionWorstSymbol,
+                fftTotalPowerPeakToMedianDb,
+                fftTotalPowerPeakSymbol,
+                samplePeakToRmsMaxDb,
+                samplePeakToRmsWorstSymbol,
+                sampleMeanPowerPeakToMedianDb,
+                sampleMeanPowerPeakSymbol
+            );
+            outputMsg->setProductionWholeRetryGateOpen(wholeRetryGateOpen);
+            outputMsg->setDecodeAttemptDiagnostics(decodeAttemptDiagnostics);
+            outputMsg->setHeaderRawResidueMetadata(
+                headerRawResidues,
+                headerDecodedSymbols,
+                headerRawResidueModulus,
+                headerRawResidueMode
+            );
+            outputMsg->setBaseRetryGateState(
+                preRetryState.hasCRC,
+                preRetryState.headerCRCStatus
+            );
+
+            const bool residueUniform =
+                (headerRawResidues.size() == 8U)
+                && std::all_of(
+                    headerRawResidues.begin() + 1,
+                    headerRawResidues.end(),
+                    [&](int residue) { return residue == headerRawResidues.front(); });
+            const bool raw2 =
+                residueUniform
+                && (headerRawResidueModulus == 4U)
+                && (headerRawResidueMode == 2);
+            const bool splitPassed =
+                splitR2Attempt.executed
+                && splitR2Attempt.payloadCRCComputed
+                && splitR2Attempt.payloadCRCStatus;
+            const bool splitUnexpectedPass = splitPassed && !raw2;
+            const bool splitUnexpectedFail =
+                raw2
+                && splitR2Attempt.executed
+                && (!splitR2Attempt.payloadCRCComputed || !splitR2Attempt.payloadCRCStatus);
+            const bool productionGateClosed =
+                !wholeRetryGateOpen
+                && !preRetryState.payloadCRCStatus
+                && (m_spreadFactor >= 5U)
+                && !preRetryState.hasCRC;
+            const bool verboseDecoderDiagnostics =
+                (decodePath == QStringLiteral("failed"))
                 || (decodePath == QStringLiteral("minus1_bin"))
-                || (decodePath == QStringLiteral("plus1_bin")))
+                || (decodePath == QStringLiteral("plus1_bin"))
+                || splitUnexpectedPass
+                || splitUnexpectedFail
+                || productionGateClosed;
+
+            outputMsg->setVerboseDecoderDiagnostics(verboseDecoderDiagnostics);
+
+            if (verboseDecoderDiagnostics)
             {
                 outputMsg->setFftPeakDiagnostics(fftPeakDiagnostics);
                 outputMsg->setSymbolMappingDiagnostics(msg.getSymbolMappingDiagnostics());
-                outputMsg->setDecodeAttemptDiagnostics(decodeAttemptDiagnostics);
-                outputMsg->setHeaderRawResidueMetadata(
-                    headerRawResidues,
-                    headerDecodedSymbols,
-                    headerRawResidueModulus,
-                    headerRawResidueMode
-                );
-                outputMsg->setBaseRetryGateState(
-                    preRetryState.hasCRC,
-                    preRetryState.headerCRCStatus
-                );
+                outputMsg->setTransientDiagnostics(msg.getTransientDiagnostics());
             }
+
             outputMsg->setHeaderLockDiagnostic(
                 msg.getHeaderLockDiagnosticValid(),
                 msg.getHeaderLockOffset(),

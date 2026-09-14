@@ -37,8 +37,16 @@ namespace MeshtasticDemodMsg
         int secondOffset;
         float bestPower;
         float secondPower;
+        float totalPower;
+        float bestFraction;
         float sfoCumBefore;
         int timingStepAfterSymbol;
+    };
+
+    struct SymbolTransientDiagnostic
+    {
+        float peakPower = 0.0f;
+        float meanPower = 0.0f;
     };
 
     struct SymbolMappingDiagnostic
@@ -91,6 +99,7 @@ namespace MeshtasticDemodMsg
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
         const std::vector<float>& getSfoCumBefore() const { return m_sfoCumBefore; }
         const std::vector<int>& getTimingStepAfterSymbol() const { return m_timingStepAfterSymbol; }
+        const std::vector<SymbolTransientDiagnostic>& getTransientDiagnostics() const { return m_transientDiagnostics; }
         const std::vector<SymbolMappingDiagnostic>& getSymbolMappingDiagnostics() const { return m_symbolMappingDiagnostics; }
         bool getHeaderLockDiagnosticValid() const { return m_headerLockDiagnosticValid; }
         unsigned int getHeaderLockOffset() const { return m_headerLockOffset; }
@@ -138,6 +147,12 @@ namespace MeshtasticDemodMsg
             m_sfoCumBefore.push_back(sfoCumBefore);
             m_timingStepAfterSymbol.push_back(timingStepAfterSymbol);
         }
+        void pushBackTransientDiagnostic(float peakPower, float meanPower) {
+            SymbolTransientDiagnostic diagnostic;
+            diagnostic.peakPower = peakPower;
+            diagnostic.meanPower = meanPower;
+            m_transientDiagnostics.push_back(diagnostic);
+        }
         void pushBackSymbolMappingDiagnostic(const SymbolMappingDiagnostic& diagnostic) {
             m_symbolMappingDiagnostics.push_back(diagnostic);
         }
@@ -163,6 +178,9 @@ namespace MeshtasticDemodMsg
             const unsigned int timingStepDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_timingStepAfterSymbol.size()));
             m_timingStepAfterSymbol.erase(m_timingStepAfterSymbol.begin(), m_timingStepAfterSymbol.begin() + timingStepDrop);
 
+            const unsigned int transientDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_transientDiagnostics.size()));
+            m_transientDiagnostics.erase(m_transientDiagnostics.begin(), m_transientDiagnostics.begin() + transientDrop);
+
             const unsigned int symbolMappingDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_symbolMappingDiagnostics.size()));
             m_symbolMappingDiagnostics.erase(m_symbolMappingDiagnostics.begin(), m_symbolMappingDiagnostics.begin() + symbolMappingDrop);
         }
@@ -180,6 +198,7 @@ namespace MeshtasticDemodMsg
         std::vector<std::vector<float>> m_dechirpedSpectrum;
         std::vector<float> m_sfoCumBefore;
         std::vector<int> m_timingStepAfterSymbol;
+        std::vector<SymbolTransientDiagnostic> m_transientDiagnostics;
         std::vector<SymbolMappingDiagnostic> m_symbolMappingDiagnostics;
         bool m_headerLockDiagnosticValid;
         unsigned int m_headerLockOffset;
@@ -372,7 +391,18 @@ namespace MeshtasticDemodMsg
         float getFftMarginAvgDb() const { return m_fftMarginAvgDb; }
         unsigned int getFftMarginLt1Db() const { return m_fftMarginLt1Db; }
         unsigned int getFftMarginLt3Db() const { return m_fftMarginLt3Db; }
+        float getFftBestFractionMin() const { return m_fftBestFractionMin; }
+        int getFftBestFractionWorstSymbol() const { return m_fftBestFractionWorstSymbol; }
+        float getFftTotalPowerPeakToMedianDb() const { return m_fftTotalPowerPeakToMedianDb; }
+        int getFftTotalPowerPeakSymbol() const { return m_fftTotalPowerPeakSymbol; }
+        float getSamplePeakToRmsMaxDb() const { return m_samplePeakToRmsMaxDb; }
+        int getSamplePeakToRmsWorstSymbol() const { return m_samplePeakToRmsWorstSymbol; }
+        float getSampleMeanPowerPeakToMedianDb() const { return m_sampleMeanPowerPeakToMedianDb; }
+        int getSampleMeanPowerPeakSymbol() const { return m_sampleMeanPowerPeakSymbol; }
+        bool getProductionWholeRetryGateOpen() const { return m_productionWholeRetryGateOpen; }
+        bool getVerboseDecoderDiagnostics() const { return m_verboseDecoderDiagnostics; }
         const std::vector<FftPeakDiagnostic>& getFftPeakDiagnostics() const { return m_fftPeakDiagnostics; }
+        const std::vector<SymbolTransientDiagnostic>& getTransientDiagnostics() const { return m_transientDiagnostics; }
         const std::vector<SymbolMappingDiagnostic>& getSymbolMappingDiagnostics() const { return m_symbolMappingDiagnostics; }
         bool getHeaderLockDiagnosticValid() const { return m_headerLockDiagnosticValid; }
         unsigned int getHeaderLockOffset() const { return m_headerLockOffset; }
@@ -438,11 +468,39 @@ namespace MeshtasticDemodMsg
         void setFftMarginLt3Db(unsigned int count) {
             m_fftMarginLt3Db = count;
         }
+        void setTransientSummary(
+            float fftBestFractionMin,
+            int fftBestFractionWorstSymbol,
+            float fftTotalPowerPeakToMedianDb,
+            int fftTotalPowerPeakSymbol,
+            float samplePeakToRmsMaxDb,
+            int samplePeakToRmsWorstSymbol,
+            float sampleMeanPowerPeakToMedianDb,
+            int sampleMeanPowerPeakSymbol)
+        {
+            m_fftBestFractionMin = fftBestFractionMin;
+            m_fftBestFractionWorstSymbol = fftBestFractionWorstSymbol;
+            m_fftTotalPowerPeakToMedianDb = fftTotalPowerPeakToMedianDb;
+            m_fftTotalPowerPeakSymbol = fftTotalPowerPeakSymbol;
+            m_samplePeakToRmsMaxDb = samplePeakToRmsMaxDb;
+            m_samplePeakToRmsWorstSymbol = samplePeakToRmsWorstSymbol;
+            m_sampleMeanPowerPeakToMedianDb = sampleMeanPowerPeakToMedianDb;
+            m_sampleMeanPowerPeakSymbol = sampleMeanPowerPeakSymbol;
+        }
+        void setProductionWholeRetryGateOpen(bool open) {
+            m_productionWholeRetryGateOpen = open;
+        }
+        void setVerboseDecoderDiagnostics(bool verbose) {
+            m_verboseDecoderDiagnostics = verbose;
+        }
         void setFftPeakDiagnostics(const std::vector<FftPeakDiagnostic>& diagnostics) {
             m_fftPeakDiagnostics = diagnostics;
         }
         void setSymbolMappingDiagnostics(const std::vector<SymbolMappingDiagnostic>& diagnostics) {
             m_symbolMappingDiagnostics = diagnostics;
+        }
+        void setTransientDiagnostics(const std::vector<SymbolTransientDiagnostic>& diagnostics) {
+            m_transientDiagnostics = diagnostics;
         }
         void setHeaderLockDiagnostic(bool valid, unsigned int offset, int delta) {
             m_headerLockDiagnosticValid = valid;
@@ -536,7 +594,18 @@ namespace MeshtasticDemodMsg
         float m_fftMarginAvgDb;
         unsigned int m_fftMarginLt1Db;
         unsigned int m_fftMarginLt3Db;
+        float m_fftBestFractionMin;
+        int m_fftBestFractionWorstSymbol;
+        float m_fftTotalPowerPeakToMedianDb;
+        int m_fftTotalPowerPeakSymbol;
+        float m_samplePeakToRmsMaxDb;
+        int m_samplePeakToRmsWorstSymbol;
+        float m_sampleMeanPowerPeakToMedianDb;
+        int m_sampleMeanPowerPeakSymbol;
+        bool m_productionWholeRetryGateOpen;
+        bool m_verboseDecoderDiagnostics;
         std::vector<FftPeakDiagnostic> m_fftPeakDiagnostics;
+        std::vector<SymbolTransientDiagnostic> m_transientDiagnostics;
         std::vector<SymbolMappingDiagnostic> m_symbolMappingDiagnostics;
         bool m_headerLockDiagnosticValid;
         unsigned int m_headerLockOffset;
@@ -582,6 +651,16 @@ namespace MeshtasticDemodMsg
             m_fftMarginAvgDb(0.0),
             m_fftMarginLt1Db(0),
             m_fftMarginLt3Db(0),
+            m_fftBestFractionMin(0.0f),
+            m_fftBestFractionWorstSymbol(-1),
+            m_fftTotalPowerPeakToMedianDb(0.0f),
+            m_fftTotalPowerPeakSymbol(-1),
+            m_samplePeakToRmsMaxDb(0.0f),
+            m_samplePeakToRmsWorstSymbol(-1),
+            m_sampleMeanPowerPeakToMedianDb(0.0f),
+            m_sampleMeanPowerPeakSymbol(-1),
+            m_productionWholeRetryGateOpen(false),
+            m_verboseDecoderDiagnostics(false),
             m_headerLockDiagnosticValid(false),
             m_headerLockOffset(0),
             m_headerLockDelta(0),
