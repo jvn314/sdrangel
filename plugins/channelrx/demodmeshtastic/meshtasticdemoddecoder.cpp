@@ -686,6 +686,22 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             && (headerRawResidueModulus == 4U)
             && (headerRawResidueMode == 2);
 
+        auto makePayloadShiftedSymbols = [&](int delta)
+        {
+            std::vector<unsigned short> shifted = msg.getSymbols();
+            const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
+
+            for (size_t i = 8U; i < shifted.size(); ++i)
+            {
+                const int symbol = static_cast<int>(shifted[i]);
+                const int shiftedSymbol = (symbol + delta) % static_cast<int>(payloadMod);
+                shifted[i] = static_cast<unsigned short>(
+                    shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(payloadMod) : shiftedSymbol);
+            }
+
+            return shifted;
+        };
+
         bool splitR2Recovered = false;
 
         // DECODER BEHAVIOR CHANGE: promote the measured raw-residue-2 recovery
@@ -697,16 +713,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             && !preRetryState.payloadCRCStatus
             && (m_spreadFactor >= 5U))
         {
-            std::vector<unsigned short> shifted = msg.getSymbols();
-            const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
-
-            for (size_t i = 8U; i < shifted.size(); ++i)
-            {
-                const int symbol = static_cast<int>(shifted[i]);
-                const int shiftedSymbol = (symbol - 1) % static_cast<int>(payloadMod);
-                shifted[i] = static_cast<unsigned short>(
-                    shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(payloadMod) : shiftedSymbol);
-            }
+            std::vector<unsigned short> shifted = makePayloadShiftedSymbols(-1);
 
             QByteArray splitBytes;
             MeshtasticDemodDecoderLoRa::DecodeTrace splitTrace;
@@ -802,14 +809,9 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         }
         else
         {
-            QString gateReason = QStringLiteral("not_candidate");
-
-            if (!preRetryState.payloadCRCStatus
-                && (m_spreadFactor >= 5U)
-                && !preRetryState.hasCRC) {
-                gateReason = QStringLiteral("gate_closed");
-            }
-
+            const QString gateReason = splitR2Recovered
+                ? QStringLiteral("prior_attempt_passed")
+                : QStringLiteral("not_candidate");
             wholeMinus1Attempt.stopReason = gateReason;
             wholePlus1Attempt.stopReason = gateReason;
         }
@@ -882,16 +884,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             if (!splitR2Attempt.executed)
             {
                 restoreLoRaState(acceptedState);
-                std::vector<unsigned short> shifted = msg.getSymbols();
-                const unsigned int payloadMod = 1U << std::max(1U, m_nbSymbolBits);
-
-                for (size_t i = 8U; i < shifted.size(); ++i)
-                {
-                    const int symbol = static_cast<int>(shifted[i]);
-                    const int shiftedSymbol = (symbol - 1) % static_cast<int>(payloadMod);
-                    shifted[i] = static_cast<unsigned short>(
-                        shiftedSymbol < 0 ? shiftedSymbol + static_cast<int>(payloadMod) : shiftedSymbol);
-                }
+                std::vector<unsigned short> shifted = makePayloadShiftedSymbols(-1);
 
                 QByteArray splitBytes;
                 MeshtasticDemodDecoderLoRa::DecodeTrace splitTrace;
@@ -977,29 +970,17 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 preRetryState.headerCRCStatus
             );
 
-            const bool residueUniform =
-                (headerRawResidues.size() == 8U)
-                && std::all_of(
-                    headerRawResidues.begin() + 1,
-                    headerRawResidues.end(),
-                    [&](int residue) { return residue == headerRawResidues.front(); });
-            const bool raw2 =
-                residueUniform
-                && (headerRawResidueModulus == 4U)
-                && (headerRawResidueMode == 2);
             const bool splitPassed =
                 splitR2Attempt.executed
                 && splitR2Attempt.payloadCRCComputed
                 && splitR2Attempt.payloadCRCStatus;
-            const bool splitUnexpectedPass = splitPassed && !raw2;
+            const bool splitUnexpectedPass = splitPassed && !rawResidue2;
             const bool splitUnexpectedFail =
-                raw2
+                rawResidue2
                 && splitR2Attempt.executed
                 && (!splitR2Attempt.payloadCRCComputed || !splitR2Attempt.payloadCRCStatus);
-            const bool productionGateClosed =
-                !wholeRetryGateOpen
-                && !preRetryState.payloadCRCStatus
-                && (m_spreadFactor >= 5U)
+            const bool legacyHasCRCGateWouldHaveClosed =
+                wholeRetryGateOpen
                 && !preRetryState.hasCRC;
             const bool verboseDecoderDiagnostics =
                 (decodePath == QStringLiteral("failed"))
@@ -1008,7 +989,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 || (decodePath == QStringLiteral("plus1_bin"))
                 || splitUnexpectedPass
                 || splitUnexpectedFail
-                || productionGateClosed;
+                || legacyHasCRCGateWouldHaveClosed;
 
             outputMsg->setVerboseDecoderDiagnostics(verboseDecoderDiagnostics);
 
