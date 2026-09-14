@@ -400,6 +400,7 @@ namespace MeshtasticDemodMsg
         float getSampleMeanPowerPeakToMedianDb() const { return m_sampleMeanPowerPeakToMedianDb; }
         int getSampleMeanPowerPeakSymbol() const { return m_sampleMeanPowerPeakSymbol; }
         bool getProductionWholeRetryGateOpen() const { return m_productionWholeRetryGateOpen; }
+        bool getLegacyHasCRCGateWouldHaveClosed() const { return m_legacyHasCRCGateWouldHaveClosed; }
         bool getVerboseDecoderDiagnostics() const { return m_verboseDecoderDiagnostics; }
         const std::vector<FftPeakDiagnostic>& getFftPeakDiagnostics() const { return m_fftPeakDiagnostics; }
         const std::vector<SymbolTransientDiagnostic>& getTransientDiagnostics() const { return m_transientDiagnostics; }
@@ -489,6 +490,9 @@ namespace MeshtasticDemodMsg
         }
         void setProductionWholeRetryGateOpen(bool open) {
             m_productionWholeRetryGateOpen = open;
+        }
+        void setLegacyHasCRCGateWouldHaveClosed(bool wouldHaveClosed) {
+            m_legacyHasCRCGateWouldHaveClosed = wouldHaveClosed;
         }
         void setVerboseDecoderDiagnostics(bool verbose) {
             m_verboseDecoderDiagnostics = verbose;
@@ -603,6 +607,7 @@ namespace MeshtasticDemodMsg
         float m_sampleMeanPowerPeakToMedianDb;
         int m_sampleMeanPowerPeakSymbol;
         bool m_productionWholeRetryGateOpen;
+        bool m_legacyHasCRCGateWouldHaveClosed;
         bool m_verboseDecoderDiagnostics;
         std::vector<FftPeakDiagnostic> m_fftPeakDiagnostics;
         std::vector<SymbolTransientDiagnostic> m_transientDiagnostics;
@@ -660,6 +665,7 @@ namespace MeshtasticDemodMsg
             m_sampleMeanPowerPeakToMedianDb(0.0f),
             m_sampleMeanPowerPeakSymbol(-1),
             m_productionWholeRetryGateOpen(false),
+            m_legacyHasCRCGateWouldHaveClosed(false),
             m_verboseDecoderDiagnostics(false),
             m_headerLockDiagnosticValid(false),
             m_headerLockOffset(0),
