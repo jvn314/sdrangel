@@ -772,6 +772,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         packetMetadata["base_has_crc"] = msg.getBaseHasCRC();
         packetMetadata["base_header_crc_passed"] = msg.getBaseHeaderCRCStatus();
         packetMetadata["production_whole_retry_gate_open"] = msg.getProductionWholeRetryGateOpen();
+        packetMetadata["legacy_has_crc_gate_would_have_closed"] =
+            msg.getLegacyHasCRCGateWouldHaveClosed();
         packetMetadata["header_raw_residue_modulus"] = static_cast<int>(msg.getHeaderRawResidueModulus());
         packetMetadata["header_raw_residue_mode"] = msg.getHeaderRawResidueMode();
 
