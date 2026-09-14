@@ -729,9 +729,11 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             }
         }
 
+        // DECODER BEHAVIOR CHANGE: an invalid base header must not veto recovery
+        // using its unvalidated hasCRC bit. Allow whole-shift retries after any
+        // failed payload decode; each candidate must validate its own fresh header.
         const bool wholeRetryGateOpen =
             !splitR2Recovered
-            && preRetryState.hasCRC
             && !preRetryState.payloadCRCStatus
             && (m_spreadFactor >= 5U);
 
