@@ -982,6 +982,9 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             const bool legacyHasCRCGateWouldHaveClosed =
                 wholeRetryGateOpen
                 && !preRetryState.hasCRC;
+            outputMsg->setLegacyHasCRCGateWouldHaveClosed(
+                legacyHasCRCGateWouldHaveClosed
+            );
             const bool verboseDecoderDiagnostics =
                 (decodePath == QStringLiteral("failed"))
                 || (decodePath == QStringLiteral("split_r2"))
