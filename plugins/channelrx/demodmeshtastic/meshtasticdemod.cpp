@@ -639,6 +639,16 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["fft_margin_lt_1db"] = static_cast<int>(msg.getFftMarginLt1Db());
     lora["fft_margin_lt_3db"] = static_cast<int>(msg.getFftMarginLt3Db());
     lora["decode_path"] = msg.getDecodePath();
+    lora["candidate_id"] = msg.getDecodePath();
+
+    if ((msg.getDecodePath() == QStringLiteral("plus1_bin"))
+        || (msg.getDecodePath() == QStringLiteral("minus1_bin"))) {
+        lora["header_source"] = QStringLiteral("REDECODED");
+    } else if ((msg.getDecodePath() == QStringLiteral("soft"))
+        || (msg.getDecodePath() == QStringLiteral("hard"))
+        || (msg.getDecodePath() == QStringLiteral("split_r2"))) {
+        lora["header_source"] = QStringLiteral("BASE_VALIDATED");
+    }
 
     if (msg.getHeaderLockDiagnosticValid())
     {
@@ -796,6 +806,17 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
             attempt["payload_delta"] = diagnostic.payloadDelta;
             attempt["executed"] = diagnostic.executed;
             attempt["stop_reason"] = diagnostic.stopReason;
+
+            if (diagnostic.executed)
+            {
+                if (diagnostic.payloadCRCComputed) {
+                    attempt["candidate_outcome"] = diagnostic.payloadCRCStatus
+                        ? QStringLiteral("pass")
+                        : QStringLiteral("payload_crc_fail");
+                } else {
+                    attempt["candidate_outcome"] = QStringLiteral("no_crc_result");
+                }
+            }
 
             QString headerCRCState = QStringLiteral("not_computed");
             if (diagnostic.headerCRCComputed) {
