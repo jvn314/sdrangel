@@ -826,6 +826,9 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
             attempt["attempt_id"] = diagnostic.attemptId;
             attempt["header_delta"] = diagnostic.headerDelta;
             attempt["payload_delta"] = diagnostic.payloadDelta;
+
+            // Report FFT-bin changes separately from decoded-symbol changes.
+            attempt["raw_fft_bin_delta"] = diagnostic.rawFftBinDelta;
             attempt["executed"] = diagnostic.executed;
             attempt["stop_reason"] = diagnostic.stopReason;
 

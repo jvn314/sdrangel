@@ -68,6 +68,8 @@ namespace MeshtasticDemodMsg
         QString attemptId;
         int headerDelta = 0;
         int payloadDelta = 0;
+        // Record a raw FFT-bin change separately from decoded-symbol changes.
+        int rawFftBinDelta = 0;
         bool executed = false;
         QString stopReason;
         bool headerCRCComputed = false;
@@ -95,6 +97,8 @@ namespace MeshtasticDemodMsg
 
     public:
         const std::vector<unsigned short>& getSymbols() const { return m_symbols; }
+        // Return the original FFT peak bin recorded for each LoRa message symbol.
+        const std::vector<unsigned int>& getRawFftBins() const { return m_rawFftBins; }
         const std::vector<std::vector<float>>& getMagnitudes() const { return m_magnitudes; }
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
         const std::vector<float>& getSfoCumBefore() const { return m_sfoCumBefore; }
@@ -114,8 +118,17 @@ namespace MeshtasticDemodMsg
         void pushBackSymbol(unsigned short symbol) {
             m_symbols.push_back(symbol);
         }
+        // Store the FFT peak bin before it is converted to a LoRa symbol value.
+        void pushBackRawFftBin(unsigned int bin) {
+            m_rawFftBins.push_back(bin);
+        }
         void popSymbol() {
             m_symbols.pop_back();
+
+            // Keep the FFT-bin list aligned with the LoRa symbol list.
+            if (!m_rawFftBins.empty()) {
+                m_rawFftBins.pop_back();
+            }
         }
         void setSyncWord(unsigned char syncWord) {
             m_syncWord = syncWord;
@@ -166,6 +179,10 @@ namespace MeshtasticDemodMsg
             const unsigned int symbolsDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_symbols.size()));
             m_symbols.erase(m_symbols.begin(), m_symbols.begin() + symbolsDrop);
 
+            // Drop the same leading entries from the stored FFT-bin list.
+            const unsigned int rawFftBinsDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_rawFftBins.size()));
+            m_rawFftBins.erase(m_rawFftBins.begin(), m_rawFftBins.begin() + rawFftBinsDrop);
+
             const unsigned int magnitudesDrop = std::min<unsigned int>(count, static_cast<unsigned int>(m_magnitudes.size()));
             m_magnitudes.erase(m_magnitudes.begin(), m_magnitudes.begin() + magnitudesDrop);
 
@@ -194,6 +211,8 @@ namespace MeshtasticDemodMsg
 
     private:
         std::vector<unsigned short> m_symbols;
+        // Keep the original FFT peak bin for every LoRa message symbol.
+        std::vector<unsigned int> m_rawFftBins;
         std::vector<std::vector<float>> m_magnitudes;
         std::vector<std::vector<float>> m_dechirpedSpectrum;
         std::vector<float> m_sfoCumBefore;

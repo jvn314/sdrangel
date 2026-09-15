@@ -1176,6 +1176,9 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
     const unsigned int rawSymbol = getLoRaSymbolVal(m_loRaInDown.data(), m_loRaPayloadDownchirp.data(), &symbolMags, true);
     const bool headerSymbol = m_loRaFrameSymbolCount < 8U;
     const unsigned short symbol = evalSymbol(rawSymbol, headerSymbol) % m_nbSymbolsEff;
+
+    // Save the original FFT peak bin before normal LoRa symbol conversion.
+    m_decodeMsg->pushBackRawFftBin(rawSymbol);
     m_decodeMsg->pushBackSymbol(symbol);
     m_decodeMsg->pushBackMagnitudes(symbolMags);
 

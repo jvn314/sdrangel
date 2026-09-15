@@ -595,6 +595,10 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         MeshtasticDemodMsg::DecodeAttemptDiagnostic splitR2Attempt =
             makeAttempt(QStringLiteral("split_r2"), 0, -1);
 
+        // Record the second decode that changes FFT bins before LoRa symbol conversion.
+        MeshtasticDemodMsg::DecodeAttemptDiagnostic rawFftAttempt =
+            makeAttempt(QStringLiteral("raw_fft_shift"), 0, 0);
+
         if (canSoftDecode)
         {
             const unsigned int headerNbSymbolBits =
@@ -681,10 +685,20 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 headerRawResidues.begin() + 1,
                 headerRawResidues.end(),
                 [&](int residue) { return residue == headerRawResidues.front(); });
-        const bool rawResidue2 =
+        // Mark the complete 8-symbol LoRa header when every FFT peak is one bin low.
+        const bool loRa8SymbolHeaderOneBinLow =
+            headerRawResidueUniform
+            && (headerRawResidueModulus == 4U)
+            && (headerRawResidueMode == 0);
+
+        // Mark the complete 8-symbol LoRa header when every FFT peak is one bin high.
+        const bool loRa8SymbolHeaderOneBinHigh =
             headerRawResidueUniform
             && (headerRawResidueModulus == 4U)
             && (headerRawResidueMode == 2);
+
+        // Reuse the same 8-symbol LoRa header test for the existing -1 payload recovery.
+        const bool rawResidue2 = loRa8SymbolHeaderOneBinHigh;
 
         auto makePayloadShiftedSymbols = [&](int delta)
         {
@@ -820,6 +834,65 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         // Everything below is diagnostic-only. Preserve the production-selected
         // state and run missing alternatives without changing decodePath or output.
         const LoRaDecodeState acceptedState = captureLoRaState(msgBytes);
+
+        // Select the FFT-bin change from the complete 8-symbol LoRa header.
+        int rawFftBinDelta = 0;
+        if (loRa8SymbolHeaderOneBinLow) {
+            rawFftBinDelta = +1;
+        } else if (loRa8SymbolHeaderOneBinHigh) {
+            rawFftBinDelta = -1;
+        }
+        rawFftAttempt.rawFftBinDelta = rawFftBinDelta;
+
+        // The 8-symbol LoRa header FFT peak bins normally fall on bin indexes 1,5,9,... modulo 4.
+        // If all 8 LoRa header FFT peak bins fall one bin low, decode all symbols in the message with FFT bin +1.
+        // If all 8 LoRa header FFT peak bins fall one bin high, decode all symbols in the message with FFT bin -1.
+        // This second decode only records its result; it does not change the message returned by the current decoder.
+        if ((rawFftBinDelta != 0)
+            && m_hasHeader
+            && (m_spreadFactor >= 5U)
+            && (msg.getRawFftBins().size() == msg.getSymbols().size()))
+        {
+            const std::vector<unsigned int>& rawFftBins = msg.getRawFftBins();
+            const unsigned int fftBinCount = 1U << m_spreadFactor;
+            std::vector<unsigned short> remappedSymbols;
+            remappedSymbols.reserve(rawFftBins.size());
+
+            // Rebuild every LoRa symbol after changing its original FFT peak bin.
+            for (size_t i = 0; i < rawFftBins.size(); ++i)
+            {
+                const int correctedBin =
+                    (static_cast<int>(rawFftBins[i])
+                        + rawFftBinDelta
+                        + static_cast<int>(fftBinCount))
+                    % static_cast<int>(fftBinCount);
+                const bool loRaHeaderSymbol = i < 8U;
+                unsigned int spread = 1U << m_deBits;
+
+                if (loRaHeaderSymbol && (m_deBits < 2U)) {
+                    spread <<= (2U - m_deBits);
+                }
+
+                const unsigned int shiftedBin =
+                    (static_cast<unsigned int>(correctedBin)
+                        + fftBinCount - 1U)
+                    % fftBinCount;
+                remappedSymbols.push_back(
+                    static_cast<unsigned short>(shiftedBin / std::max(1U, spread)));
+            }
+
+            // Decode the rebuilt symbols from the same state used before current recovery attempts.
+            restoreLoRaState(preRetryState);
+            QByteArray rawFftBytes;
+            MeshtasticDemodDecoderLoRa::DecodeTrace rawFftTrace;
+            decodeSymbolsWithTrace(remappedSymbols, rawFftBytes, rawFftTrace);
+            const LoRaDecodeState rawFftState = captureLoRaState(rawFftBytes);
+            populateAttempt(rawFftAttempt, rawFftState, rawFftTrace);
+
+            // Restore the production-selected result after the parallel decode finishes.
+            restoreLoRaState(acceptedState);
+        }
+
         const bool diagnosticEligible =
             m_hasHeader
             && (msg.getSymbols().size() >= 8U)
@@ -909,12 +982,14 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             splitR2Attempt.stopReason = QStringLiteral("not_applicable");
         }
 
+        // Record the parallel FFT-bin decode with the existing decoder attempts.
         std::vector<MeshtasticDemodMsg::DecodeAttemptDiagnostic> decodeAttemptDiagnostics {
             baseSoftAttempt,
             baseHardAttempt,
             wholeMinus1Attempt,
             wholePlus1Attempt,
-            splitR2Attempt
+            splitR2Attempt,
+            rawFftAttempt
         };
 
         qDebug(
@@ -986,11 +1061,13 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setLegacyHasCRCGateWouldHaveClosed(
                 legacyHasCRCGateWouldHaveClosed
             );
+            // Keep full symbol details whenever the parallel FFT-bin decode runs.
             const bool verboseDecoderDiagnostics =
                 (decodePath == QStringLiteral("failed"))
                 || (decodePath == QStringLiteral("split_r2"))
                 || (decodePath == QStringLiteral("minus1_bin"))
                 || (decodePath == QStringLiteral("plus1_bin"))
+                || rawFftAttempt.executed
                 || splitUnexpectedPass
                 || splitUnexpectedFail
                 || legacyHasCRCGateWouldHaveClosed;
