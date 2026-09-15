@@ -1322,6 +1322,39 @@ bool MeshtasticDemod::deserialize(const QByteArray& data)
 
 void MeshtasticDemod::applySettings(MeshtasticDemodSettings settings, bool force)
 {
+    // Preserve unrelated changes if the UI briefly presents an invalid SF/DE pair.
+    const int requestedSpreadFactor = settings.m_spreadFactor;
+    const int requestedDeBits = settings.m_deBits;
+    const bool requestedLoRaWidthsValid =
+        (requestedSpreadFactor > 0)
+        && (requestedDeBits >= 0)
+        && (requestedDeBits < requestedSpreadFactor);
+    bool sanitizedLoRaWidths = false;
+
+    // Replace only the invalid width pair with the last valid pair before anything is applied or reported.
+    if (!requestedLoRaWidthsValid)
+    {
+        MeshtasticDemodSettings fallbackSettings;
+        const bool currentLoRaWidthsValid =
+            (m_settings.m_spreadFactor > 0)
+            && (m_settings.m_deBits >= 0)
+            && (m_settings.m_deBits < m_settings.m_spreadFactor);
+
+        settings.m_spreadFactor = currentLoRaWidthsValid
+            ? m_settings.m_spreadFactor
+            : fallbackSettings.m_spreadFactor;
+        settings.m_deBits = currentLoRaWidthsValid
+            ? m_settings.m_deBits
+            : fallbackSettings.m_deBits;
+        sanitizedLoRaWidths = true;
+
+        qWarning() << "MeshtasticDemod::applySettings: keeping previous valid LoRa widths"
+                   << "requestedSpreadFactor=" << requestedSpreadFactor
+                   << "requestedDeBits=" << requestedDeBits
+                   << "activeSpreadFactor=" << settings.m_spreadFactor
+                   << "activeDeBits=" << settings.m_deBits;
+    }
+
     qDebug() << "MeshtasticDemod::applySettings:"
             << " m_inputFrequencyOffset: " << settings.m_inputFrequencyOffset
             << " m_bandwidthIndex: " << settings.m_bandwidthIndex
@@ -1488,14 +1521,11 @@ void MeshtasticDemod::applySettings(MeshtasticDemodSettings settings, bool force
 
     m_settings = settings;
 
-    // Forward preset-derived settings back to GUI so controls (e.g. BW slider) reflect
-    // the values actually applied. Skip for USER preset: no parameters were derived, so
-    // there is nothing to sync back — and echoing would trigger an infinite apply loop
-    // (GUI apply → demod echo → GUI displaySettings → rebuildMeshtasticChannelOptions
-    // → queued apply → …).
+    // Echo preset-derived settings, and echo a USER preset only when an invalid SF/DE pair was corrected.
     const bool isUserPreset = m_settings.m_meshtasticPresetName.trimmed().compare("USER", Qt::CaseInsensitive) == 0;
-    if (!isUserPreset && getMessageQueueToGUI())
+    if ((!isUserPreset || sanitizedLoRaWidths) && getMessageQueueToGUI())
     {
+        // A corrected USER echo is one-shot because the returned pair is valid on the next apply.
         MsgConfigureMeshtasticDemod *msgToGUI = MsgConfigureMeshtasticDemod::create(m_settings, false);
         getMessageQueueToGUI()->push(msgToGUI);
     }
