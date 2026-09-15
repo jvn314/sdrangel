@@ -261,34 +261,55 @@ void MeshtasticDemod::makePipelineConfigFromSettings(int configId, PipelineConfi
 
 void MeshtasticDemod::applyPipelineRuntimeSettings(PipelineRuntime& runtime, const MeshtasticDemodSettings& settings, bool force)
 {
-    // Reject invalid LoRa width settings before either runtime class consumes them.
-    if ((settings.m_spreadFactor <= 0)
-        || (settings.m_deBits < 0)
-        || (settings.m_deBits >= settings.m_spreadFactor))
+    // Keep unrelated settings responsive if the UI briefly presents an invalid SF/DE pair.
+    MeshtasticDemodSettings effectiveSettings = settings;
+    const bool validLoRaWidths =
+        (settings.m_spreadFactor > 0)
+        && (settings.m_deBits >= 0)
+        && (settings.m_deBits < settings.m_spreadFactor);
+
+    // Preserve the last valid SF/DE pair, or use defaults if no valid pair exists yet.
+    if (!validLoRaWidths)
     {
-        qWarning() << "MeshtasticDemod::applyPipelineRuntimeSettings: rejecting invalid LoRa parameters"
-                   << "spreadFactor=" << settings.m_spreadFactor
-                   << "deBits=" << settings.m_deBits;
-        return;
+        MeshtasticDemodSettings fallbackSettings;
+        const bool runtimeWidthsValid =
+            (runtime.settings.m_spreadFactor > 0)
+            && (runtime.settings.m_deBits >= 0)
+            && (runtime.settings.m_deBits < runtime.settings.m_spreadFactor);
+
+        effectiveSettings.m_spreadFactor = runtimeWidthsValid
+            ? runtime.settings.m_spreadFactor
+            : fallbackSettings.m_spreadFactor;
+        effectiveSettings.m_deBits = runtimeWidthsValid
+            ? runtime.settings.m_deBits
+            : fallbackSettings.m_deBits;
+
+        qWarning() << "MeshtasticDemod::applyPipelineRuntimeSettings: keeping previous valid LoRa widths"
+                   << "requestedSpreadFactor=" << settings.m_spreadFactor
+                   << "requestedDeBits=" << settings.m_deBits
+                   << "activeSpreadFactor=" << effectiveSettings.m_spreadFactor
+                   << "activeDeBits=" << effectiveSettings.m_deBits;
     }
 
-    runtime.settings = settings;
+    // Apply the sanitized settings to both runtime halves so they remain identical.
+    runtime.settings = effectiveSettings;
 
     if (runtime.decoder)
     {
         runtime.decoder->setCodingScheme(MeshtasticDemodSettings::m_codingScheme);
-        runtime.decoder->setNbSymbolBits(settings.m_spreadFactor, settings.m_deBits);
+        runtime.decoder->setNbSymbolBits(effectiveSettings.m_spreadFactor, effectiveSettings.m_deBits);
         runtime.decoder->setLoRaHasHeader(MeshtasticDemodSettings::m_hasHeader);
         runtime.decoder->setLoRaHasCRC(MeshtasticDemodSettings::m_hasCRC);
-        runtime.decoder->setLoRaParityBits(settings.m_nbParityBits);
-        runtime.decoder->setLoRaPacketLength(settings.m_packetLength);
-        runtime.decoder->setLoRaBandwidth(MeshtasticDemodSettings::bandwidths[settings.m_bandwidthIndex]);
+        runtime.decoder->setLoRaParityBits(effectiveSettings.m_nbParityBits);
+        runtime.decoder->setLoRaPacketLength(effectiveSettings.m_packetLength);
+        runtime.decoder->setLoRaBandwidth(MeshtasticDemodSettings::bandwidths[effectiveSettings.m_bandwidthIndex]);
     }
 
     if (runtime.basebandSink)
     {
+        // Send the same sanitized settings to the sink while preserving all unrelated changes.
         MeshtasticDemodBaseband::MsgConfigureMeshtasticDemodBaseband *msg =
-            MeshtasticDemodBaseband::MsgConfigureMeshtasticDemodBaseband::create(settings, force);
+            MeshtasticDemodBaseband::MsgConfigureMeshtasticDemodBaseband::create(effectiveSettings, force);
         runtime.basebandSink->getInputMessageQueue()->push(msg);
     }
 }
