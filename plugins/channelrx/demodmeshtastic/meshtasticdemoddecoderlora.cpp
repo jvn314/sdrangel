@@ -22,6 +22,49 @@
 #include "meshtasticdemodsettings.h"
 #include "meshtasticdemoddecoderlora.h"
 
+// Map a raw LoRa FFT peak bin before Gray conversion, deinterleaving, or FEC decoding.
+unsigned int MeshtasticDemodDecoderLoRa::mapRawFftBinToSymbol(
+    unsigned int rawFftBin,
+    bool loRaHeaderSymbol,
+    unsigned int spreadFactor,
+    unsigned int deBits,
+    unsigned int fftInterpolation,
+    unsigned int *shiftedBinOut,
+    unsigned int *spreadOut)
+{
+    const unsigned int nbSymbols = 1U << spreadFactor;
+    unsigned int spread = fftInterpolation * (1U << deBits);
+    const unsigned int symbolBins = fftInterpolation * nbSymbols;
+
+    if (loRaHeaderSymbol && (deBits < 2U)) {
+        spread <<= (2U - deBits);
+    }
+
+    // Preserve the original sink return behavior for degenerate inputs.
+    if (symbolBins == 0U)
+    {
+        if (shiftedBinOut) {
+            *shiftedBinOut = rawFftBin;
+        }
+        if (spreadOut) {
+            *spreadOut = spread;
+        }
+        return rawFftBin;
+    }
+
+    const unsigned int shiftedBin = (rawFftBin + symbolBins - 1U) % symbolBins;
+
+    // Return the same intermediate values used by existing mapping diagnostics.
+    if (shiftedBinOut) {
+        *shiftedBinOut = shiftedBin;
+    }
+    if (spreadOut) {
+        *spreadOut = spread;
+    }
+
+    return spread == 0U ? shiftedBin : shiftedBin / spread;
+}
+
 void MeshtasticDemodDecoderLoRa::decodeHeader(
         const std::vector<unsigned short>& inSymbols,
         unsigned int headerNbSymbolBits,

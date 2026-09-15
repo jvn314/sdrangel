@@ -29,6 +29,20 @@
 class MeshtasticDemodDecoderLoRa
 {
 public:
+    // Keep the LoRa FFT interpolation value shared by the sink and diagnostic decoder.
+    static constexpr unsigned int loRaFFTInterpolation = 1U;
+
+    // Convert one raw LoRa FFT peak bin with the same mapping used by the live sink.
+    static unsigned int mapRawFftBinToSymbol(
+        unsigned int rawFftBin,
+        bool loRaHeaderSymbol,
+        unsigned int spreadFactor,
+        unsigned int deBits,
+        unsigned int fftInterpolation,
+        unsigned int *shiftedBin = nullptr,
+        unsigned int *spreadOut = nullptr
+    );
+
     struct DecodeTrace
     {
         bool headerCRCComputed = false;

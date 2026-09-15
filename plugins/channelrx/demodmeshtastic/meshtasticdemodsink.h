@@ -94,7 +94,6 @@ private:
 
     static constexpr unsigned int m_minRequiredPreambleChirps = 4;  //!< Lower bound for preamble validation chirps
     static constexpr unsigned int m_maxRequiredPreambleChirps = 64; //!< Upper bound for preamble validation chirps
-    static constexpr unsigned int m_loRaFFTInterpolation = 1;       //!< Canonical gr-lora_sdr-like FFT binning for LoRa
 
     FFTEngine *m_fft;
     int m_fftSequence;
@@ -178,7 +177,6 @@ private:
         Complex *specBuffer,
         unsigned int specDecim
         );
-    unsigned int evalSymbol(unsigned int rawSymbol, bool headerSymbol = false);
     void tryHeaderLock();  //!< Attempt inline header decode after 8 symbols to determine expected frame length
     bool sendLoRaHeaderProbe();
     void processSampleLoRa(const Complex& ci);

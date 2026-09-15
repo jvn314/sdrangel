@@ -261,6 +261,17 @@ void MeshtasticDemod::makePipelineConfigFromSettings(int configId, PipelineConfi
 
 void MeshtasticDemod::applyPipelineRuntimeSettings(PipelineRuntime& runtime, const MeshtasticDemodSettings& settings, bool force)
 {
+    // Reject invalid LoRa width settings before either runtime class consumes them.
+    if ((settings.m_spreadFactor <= 0)
+        || (settings.m_deBits < 0)
+        || (settings.m_deBits >= settings.m_spreadFactor))
+    {
+        qWarning() << "MeshtasticDemod::applyPipelineRuntimeSettings: rejecting invalid LoRa parameters"
+                   << "spreadFactor=" << settings.m_spreadFactor
+                   << "deBits=" << settings.m_deBits;
+        return;
+    }
+
     runtime.settings = settings;
 
     if (runtime.decoder)
@@ -776,6 +787,28 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
             msg.getLegacyHasCRCGateWouldHaveClosed();
         packetMetadata["header_raw_residue_modulus"] = static_cast<int>(msg.getHeaderRawResidueModulus());
         packetMetadata["header_raw_residue_mode"] = msg.getHeaderRawResidueMode();
+
+        // Emit compact continuous checks for sink/decoder mapping consistency.
+        packetMetadata["raw_fft_zero_map_checked"] = msg.getRawFftZeroMapChecked();
+        packetMetadata["raw_fft_zero_map_match"] = msg.getRawFftZeroMapMatch();
+        packetMetadata["mapping_parameters_match"] = msg.getMappingParametersMatch();
+        packetMetadata["raw_fft_shadow_checked"] = msg.getRawFftShadowChecked();
+        if (msg.getRawFftShadowChecked()) {
+            packetMetadata["raw_fft_shadow_outcome"] = msg.getRawFftShadowOutcome();
+        }
+
+        // Emit mapping parameters when full diagnostics are retained or a mismatch occurs.
+        if (msg.getVerboseDecoderDiagnostics() || !msg.getMappingParametersMatch())
+        {
+            packetMetadata["sink_mapping_spread_factor"] = static_cast<int>(msg.getSinkMappingSpreadFactor());
+            packetMetadata["sink_mapping_de_bits"] = static_cast<int>(msg.getSinkMappingDeBits());
+            packetMetadata["sink_mapping_fft_interpolation"] = static_cast<int>(msg.getSinkMappingFftInterpolation());
+            packetMetadata["sink_mapping_effective_symbols"] = static_cast<int>(msg.getSinkMappingEffectiveSymbols());
+            packetMetadata["decoder_mapping_spread_factor"] = static_cast<int>(msg.getDecoderMappingSpreadFactor());
+            packetMetadata["decoder_mapping_de_bits"] = static_cast<int>(msg.getDecoderMappingDeBits());
+            packetMetadata["decoder_mapping_fft_interpolation"] = static_cast<int>(msg.getDecoderMappingFftInterpolation());
+            packetMetadata["decoder_mapping_effective_symbols"] = static_cast<int>(msg.getDecoderMappingEffectiveSymbols());
+        }
 
         const std::vector<int>& residueVector = msg.getHeaderRawResidues();
         const bool residueUniform =

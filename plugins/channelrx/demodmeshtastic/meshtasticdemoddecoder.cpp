@@ -52,14 +52,15 @@ MeshtasticDemodDecoder::~MeshtasticDemodDecoder()
 
 void MeshtasticDemodDecoder::setNbSymbolBits(unsigned int spreadFactor, unsigned int deBits)
 {
-    m_spreadFactor = spreadFactor;
-
-    if (deBits >= spreadFactor) {
-        m_deBits = m_spreadFactor - 1;
-    } else {
-        m_deBits = deBits;
+    // Reject invalid LoRa width settings instead of silently clamping them differently from the sink.
+    if ((spreadFactor == 0U) || (deBits >= spreadFactor))
+    {
+        qWarning("MeshtasticDemodDecoder::setNbSymbolBits: invalid SF=%u DE=%u", spreadFactor, deBits);
+        return;
     }
 
+    m_spreadFactor = spreadFactor;
+    m_deBits = deBits;
     m_nbSymbolBits = m_spreadFactor - m_deBits;
 }
 
@@ -835,6 +836,51 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         // state and run missing alternatives without changing decodePath or output.
         const LoRaDecodeState acceptedState = captureLoRaState(msgBytes);
 
+        // Compare the sink mapping parameters with the decoder values before judging shadow equivalence.
+        const bool sinkMappingParametersValid = msg.getLoRaMappingParametersValid();
+        const unsigned int sinkMappingSpreadFactor = msg.getLoRaMappingSpreadFactor();
+        const unsigned int sinkMappingDeBits = msg.getLoRaMappingDeBits();
+        const unsigned int sinkMappingFftInterpolation = msg.getLoRaMappingFftInterpolation();
+        const unsigned int sinkMappingEffectiveSymbols = msg.getLoRaMappingEffectiveSymbols();
+        const unsigned int decoderMappingSpreadFactor = m_spreadFactor;
+        const unsigned int decoderMappingDeBits = m_deBits;
+        const unsigned int decoderMappingFftInterpolation = MeshtasticDemodDecoderLoRa::loRaFFTInterpolation;
+        const unsigned int decoderMappingEffectiveSymbols = 1U << m_nbSymbolBits;
+        const bool mappingParametersMatch =
+            sinkMappingParametersValid
+            && (sinkMappingSpreadFactor == decoderMappingSpreadFactor)
+            && (sinkMappingDeBits == decoderMappingDeBits)
+            && (sinkMappingFftInterpolation == decoderMappingFftInterpolation)
+            && (sinkMappingEffectiveSymbols == decoderMappingEffectiveSymbols);
+
+        // Rebuild every stored LoRa symbol at zero FFT-bin shift and require an exact match.
+        bool rawFftZeroMapChecked = false;
+        bool rawFftZeroMapMatch = false;
+        if (sinkMappingParametersValid
+            && (sinkMappingEffectiveSymbols > 0U)
+            && (msg.getRawFftBins().size() == msg.getSymbols().size()))
+        {
+            std::vector<unsigned short> zeroShiftSymbols;
+            zeroShiftSymbols.reserve(msg.getRawFftBins().size());
+
+            // Use the shared raw-bin mapping for the continuous zero-shift self-check.
+            for (size_t i = 0; i < msg.getRawFftBins().size(); ++i)
+            {
+                const unsigned int evaluatedSymbol = MeshtasticDemodDecoderLoRa::mapRawFftBinToSymbol(
+                    msg.getRawFftBins()[i],
+                    i < 8U,
+                    sinkMappingSpreadFactor,
+                    sinkMappingDeBits,
+                    sinkMappingFftInterpolation
+                );
+                zeroShiftSymbols.push_back(static_cast<unsigned short>(
+                    evaluatedSymbol % sinkMappingEffectiveSymbols));
+            }
+
+            rawFftZeroMapChecked = true;
+            rawFftZeroMapMatch = (zeroShiftSymbols == msg.getSymbols());
+        }
+
         // Select the FFT-bin change from the complete 8-symbol LoRa header.
         int rawFftBinDelta = 0;
         if (loRa8SymbolHeaderOneBinLow) {
@@ -849,12 +895,13 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         // If all 8 LoRa header FFT peak bins fall one bin high, decode all symbols in the message with FFT bin -1.
         // This second decode only records its result; it does not change the message returned by the current decoder.
         if ((rawFftBinDelta != 0)
+            && rawFftZeroMapChecked
+            && rawFftZeroMapMatch
             && m_hasHeader
-            && (m_spreadFactor >= 5U)
-            && (msg.getRawFftBins().size() == msg.getSymbols().size()))
+            && (m_spreadFactor >= 5U))
         {
             const std::vector<unsigned int>& rawFftBins = msg.getRawFftBins();
-            const unsigned int fftBinCount = 1U << m_spreadFactor;
+            const unsigned int rawFftBinCount = 1U << sinkMappingSpreadFactor;
             std::vector<unsigned short> remappedSymbols;
             remappedSymbols.reserve(rawFftBins.size());
 
@@ -864,21 +911,17 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 const int correctedBin =
                     (static_cast<int>(rawFftBins[i])
                         + rawFftBinDelta
-                        + static_cast<int>(fftBinCount))
-                    % static_cast<int>(fftBinCount);
-                const bool loRaHeaderSymbol = i < 8U;
-                unsigned int spread = 1U << m_deBits;
-
-                if (loRaHeaderSymbol && (m_deBits < 2U)) {
-                    spread <<= (2U - m_deBits);
-                }
-
-                const unsigned int shiftedBin =
-                    (static_cast<unsigned int>(correctedBin)
-                        + fftBinCount - 1U)
-                    % fftBinCount;
-                remappedSymbols.push_back(
-                    static_cast<unsigned short>(shiftedBin / std::max(1U, spread)));
+                        + static_cast<int>(rawFftBinCount))
+                    % static_cast<int>(rawFftBinCount);
+                const unsigned int evaluatedSymbol = MeshtasticDemodDecoderLoRa::mapRawFftBinToSymbol(
+                    static_cast<unsigned int>(correctedBin),
+                    i < 8U,
+                    sinkMappingSpreadFactor,
+                    sinkMappingDeBits,
+                    sinkMappingFftInterpolation
+                );
+                remappedSymbols.push_back(static_cast<unsigned short>(
+                    evaluatedSymbol % sinkMappingEffectiveSymbols));
             }
 
             // Decode the rebuilt symbols from the same state used before current recovery attempts.
@@ -891,6 +934,50 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
             // Restore the production-selected result after the parallel decode finishes.
             restoreLoRaState(acceptedState);
+        }
+
+        // Classify only comparable recovery paths, with parameter mismatch taking precedence.
+        const bool rawFftShadowChecked = rawFftAttempt.executed;
+        QString rawFftShadowOutcome;
+        if (rawFftShadowChecked)
+        {
+            const bool rawFftShadowPassed =
+                rawFftAttempt.headerCRCComputed
+                && rawFftAttempt.headerCRCStatus
+                && rawFftAttempt.hasCRC
+                && rawFftAttempt.payloadCRCComputed
+                && rawFftAttempt.payloadCRCStatus;
+
+            if (!mappingParametersMatch)
+            {
+                rawFftShadowOutcome = QStringLiteral("parameter_mismatch");
+            }
+            else if ((decodePath == QStringLiteral("soft"))
+                || (decodePath == QStringLiteral("hard")))
+            {
+                rawFftShadowOutcome = QStringLiteral("base_passed_no_recovery");
+            }
+            else if ((decodePath == QStringLiteral("plus1_bin"))
+                || (decodePath == QStringLiteral("split_r2")))
+            {
+                if (!rawFftShadowPassed) {
+                    rawFftShadowOutcome = QStringLiteral("production_only");
+                } else if (rawFftAttempt.bytes == acceptedState.bytes) {
+                    rawFftShadowOutcome = QStringLiteral("both_pass_same_bytes");
+                } else {
+                    rawFftShadowOutcome = QStringLiteral("both_pass_different_bytes");
+                }
+            }
+            else if (decodePath == QStringLiteral("failed"))
+            {
+                rawFftShadowOutcome = rawFftShadowPassed
+                    ? QStringLiteral("parallel_only")
+                    : QStringLiteral("both_failed");
+            }
+            else
+            {
+                rawFftShadowOutcome = QStringLiteral("base_passed_no_recovery");
+            }
         }
 
         const bool diagnosticEligible =
@@ -1046,6 +1133,23 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 preRetryState.headerCRCStatus
             );
 
+            // Store compact mapping checks and shadow-comparison results before retention is chosen.
+            outputMsg->setRawFftMappingDiagnostics(
+                rawFftZeroMapChecked,
+                rawFftZeroMapMatch,
+                mappingParametersMatch,
+                rawFftShadowChecked,
+                rawFftShadowOutcome,
+                sinkMappingSpreadFactor,
+                sinkMappingDeBits,
+                sinkMappingFftInterpolation,
+                sinkMappingEffectiveSymbols,
+                decoderMappingSpreadFactor,
+                decoderMappingDeBits,
+                decoderMappingFftInterpolation,
+                decoderMappingEffectiveSymbols
+            );
+
             const bool splitPassed =
                 splitR2Attempt.executed
                 && splitR2Attempt.payloadCRCComputed
@@ -1061,13 +1165,26 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setLegacyHasCRCGateWouldHaveClosed(
                 legacyHasCRCGateWouldHaveClosed
             );
-            // Keep full symbol details whenever the parallel FFT-bin decode runs.
+            // Keep full details only for failures, inconsistencies, or shadow results needing investigation.
+            const bool rawFftShadowNeedsVerbose =
+                rawFftShadowChecked
+                && ((rawFftShadowOutcome == QStringLiteral("both_pass_different_bytes"))
+                    || (rawFftShadowOutcome == QStringLiteral("production_only"))
+                    || (rawFftShadowOutcome == QStringLiteral("parallel_only"))
+                    || (rawFftShadowOutcome == QStringLiteral("parameter_mismatch")));
+            const bool rawFftZeroMapMismatch =
+                rawFftZeroMapChecked && !rawFftZeroMapMatch;
+            const bool recoveryNeedsVerbose =
+                ((decodePath == QStringLiteral("split_r2"))
+                    || (decodePath == QStringLiteral("plus1_bin")))
+                && (rawFftShadowOutcome != QStringLiteral("both_pass_same_bytes"));
             const bool verboseDecoderDiagnostics =
                 (decodePath == QStringLiteral("failed"))
-                || (decodePath == QStringLiteral("split_r2"))
                 || (decodePath == QStringLiteral("minus1_bin"))
-                || (decodePath == QStringLiteral("plus1_bin"))
-                || rawFftAttempt.executed
+                || recoveryNeedsVerbose
+                || rawFftShadowNeedsVerbose
+                || rawFftZeroMapMismatch
+                || !mappingParametersMatch
                 || splitUnexpectedPass
                 || splitUnexpectedFail
                 || legacyHasCRCGateWouldHaveClosed;

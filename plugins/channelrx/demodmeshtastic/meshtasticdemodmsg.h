@@ -115,6 +115,13 @@ namespace MeshtasticDemodMsg
         float getCfoHz() const { return m_cfoHz; }
         float getSfoPpm() const { return m_sfoPpm; }
 
+        // Return the exact sink parameters used to map raw FFT bins for this LoRa frame.
+        bool getLoRaMappingParametersValid() const { return m_loRaMappingParametersValid; }
+        unsigned int getLoRaMappingSpreadFactor() const { return m_loRaMappingSpreadFactor; }
+        unsigned int getLoRaMappingDeBits() const { return m_loRaMappingDeBits; }
+        unsigned int getLoRaMappingFftInterpolation() const { return m_loRaMappingFftInterpolation; }
+        unsigned int getLoRaMappingEffectiveSymbols() const { return m_loRaMappingEffectiveSymbols; }
+
         void pushBackSymbol(unsigned short symbol) {
             m_symbols.push_back(symbol);
         }
@@ -148,6 +155,20 @@ namespace MeshtasticDemodMsg
 
         void setFrameId(uint32_t frameId) {
             m_frameId = frameId;
+        }
+
+        // Store the exact sink mapping parameters beside the raw FFT bins.
+        void setLoRaMappingParameters(
+            unsigned int spreadFactor,
+            unsigned int deBits,
+            unsigned int fftInterpolation,
+            unsigned int effectiveSymbols)
+        {
+            m_loRaMappingParametersValid = true;
+            m_loRaMappingSpreadFactor = spreadFactor;
+            m_loRaMappingDeBits = deBits;
+            m_loRaMappingFftInterpolation = fftInterpolation;
+            m_loRaMappingEffectiveSymbols = effectiveSymbols;
         }
 
         void pushBackMagnitudes(const std::vector<float>& magnitudes) {
@@ -229,6 +250,13 @@ namespace MeshtasticDemodMsg
         float m_cfoHz;
         float m_sfoPpm;
 
+        // Keep sink mapping parameters with the stored LoRa frame.
+        bool m_loRaMappingParametersValid;
+        unsigned int m_loRaMappingSpreadFactor;
+        unsigned int m_loRaMappingDeBits;
+        unsigned int m_loRaMappingFftInterpolation;
+        unsigned int m_loRaMappingEffectiveSymbols;
+
         MsgDecodeSymbols() : //!< create an empty message
             Message(),
             m_headerLockDiagnosticValid(false),
@@ -239,7 +267,13 @@ namespace MeshtasticDemodMsg
             m_signalDb(0.0),
             m_noiseDb(0.0),
             m_cfoHz(0.0),
-            m_sfoPpm(0.0)
+            m_sfoPpm(0.0),
+            // Start with no sink mapping metadata until a LoRa frame is created.
+            m_loRaMappingParametersValid(false),
+            m_loRaMappingSpreadFactor(0U),
+            m_loRaMappingDeBits(0U),
+            m_loRaMappingFftInterpolation(0U),
+            m_loRaMappingEffectiveSymbols(0U)
         {}
         MsgDecodeSymbols(const std::vector<unsigned short> symbols) : //!< create a message with symbols copy
             Message(),
@@ -251,7 +285,13 @@ namespace MeshtasticDemodMsg
             m_signalDb(0.0),
             m_noiseDb(0.0),
             m_cfoHz(0.0),
-            m_sfoPpm(0.0)
+            m_sfoPpm(0.0),
+            // Legacy symbol-only construction has no sink mapping metadata.
+            m_loRaMappingParametersValid(false),
+            m_loRaMappingSpreadFactor(0U),
+            m_loRaMappingDeBits(0U),
+            m_loRaMappingFftInterpolation(0U),
+            m_loRaMappingEffectiveSymbols(0U)
         { m_symbols = symbols; }
     };
 
@@ -439,6 +479,22 @@ namespace MeshtasticDemodMsg
         int getHeaderRawResidueMode() const { return m_headerRawResidueMode; }
         bool getBaseHasCRC() const { return m_baseHasCRC; }
         bool getBaseHeaderCRCStatus() const { return m_baseHeaderCRCStatus; }
+
+        // Return compact raw FFT-bin consistency and shadow-comparison results.
+        bool getRawFftZeroMapChecked() const { return m_rawFftZeroMapChecked; }
+        bool getRawFftZeroMapMatch() const { return m_rawFftZeroMapMatch; }
+        bool getMappingParametersMatch() const { return m_mappingParametersMatch; }
+        bool getRawFftShadowChecked() const { return m_rawFftShadowChecked; }
+        const QString& getRawFftShadowOutcome() const { return m_rawFftShadowOutcome; }
+        unsigned int getSinkMappingSpreadFactor() const { return m_sinkMappingSpreadFactor; }
+        unsigned int getSinkMappingDeBits() const { return m_sinkMappingDeBits; }
+        unsigned int getSinkMappingFftInterpolation() const { return m_sinkMappingFftInterpolation; }
+        unsigned int getSinkMappingEffectiveSymbols() const { return m_sinkMappingEffectiveSymbols; }
+        unsigned int getDecoderMappingSpreadFactor() const { return m_decoderMappingSpreadFactor; }
+        unsigned int getDecoderMappingDeBits() const { return m_decoderMappingDeBits; }
+        unsigned int getDecoderMappingFftInterpolation() const { return m_decoderMappingFftInterpolation; }
+        unsigned int getDecoderMappingEffectiveSymbols() const { return m_decoderMappingEffectiveSymbols; }
+
         const QString& getMsgTimestamp() const { return m_msgTimestamp; }
         unsigned int getPacketSize() const { return m_packetSize; }
         unsigned int getNbParityBits() const { return m_nbParityBits; }
@@ -563,6 +619,38 @@ namespace MeshtasticDemodMsg
             m_baseHasCRC = hasCRC;
             m_baseHeaderCRCStatus = headerCRCStatus;
         }
+
+        // Store compact mapping checks and shadow-comparison results for JSON reporting.
+        void setRawFftMappingDiagnostics(
+            bool zeroMapChecked,
+            bool zeroMapMatch,
+            bool mappingParametersMatch,
+            bool shadowChecked,
+            const QString& shadowOutcome,
+            unsigned int sinkSpreadFactor,
+            unsigned int sinkDeBits,
+            unsigned int sinkFftInterpolation,
+            unsigned int sinkEffectiveSymbols,
+            unsigned int decoderSpreadFactor,
+            unsigned int decoderDeBits,
+            unsigned int decoderFftInterpolation,
+            unsigned int decoderEffectiveSymbols)
+        {
+            m_rawFftZeroMapChecked = zeroMapChecked;
+            m_rawFftZeroMapMatch = zeroMapMatch;
+            m_mappingParametersMatch = mappingParametersMatch;
+            m_rawFftShadowChecked = shadowChecked;
+            m_rawFftShadowOutcome = shadowOutcome;
+            m_sinkMappingSpreadFactor = sinkSpreadFactor;
+            m_sinkMappingDeBits = sinkDeBits;
+            m_sinkMappingFftInterpolation = sinkFftInterpolation;
+            m_sinkMappingEffectiveSymbols = sinkEffectiveSymbols;
+            m_decoderMappingSpreadFactor = decoderSpreadFactor;
+            m_decoderMappingDeBits = decoderDeBits;
+            m_decoderMappingFftInterpolation = decoderFftInterpolation;
+            m_decoderMappingEffectiveSymbols = decoderEffectiveSymbols;
+        }
+
         void setMsgTimestamp(const QString& ts) {
             m_msgTimestamp = ts;
         }
@@ -646,6 +734,22 @@ namespace MeshtasticDemodMsg
         int m_headerRawResidueMode;
         bool m_baseHasCRC;
         bool m_baseHeaderCRCStatus;
+
+        // Keep raw FFT-bin consistency telemetry after production decoder state is restored.
+        bool m_rawFftZeroMapChecked;
+        bool m_rawFftZeroMapMatch;
+        bool m_mappingParametersMatch;
+        bool m_rawFftShadowChecked;
+        QString m_rawFftShadowOutcome;
+        unsigned int m_sinkMappingSpreadFactor;
+        unsigned int m_sinkMappingDeBits;
+        unsigned int m_sinkMappingFftInterpolation;
+        unsigned int m_sinkMappingEffectiveSymbols;
+        unsigned int m_decoderMappingSpreadFactor;
+        unsigned int m_decoderMappingDeBits;
+        unsigned int m_decoderMappingFftInterpolation;
+        unsigned int m_decoderMappingEffectiveSymbols;
+
         QString m_msgTimestamp;
         unsigned int m_packetSize;
         unsigned int m_nbParityBits;
@@ -704,6 +808,19 @@ namespace MeshtasticDemodMsg
             m_headerRawResidueMode(-1),
             m_baseHasCRC(false),
             m_baseHeaderCRCStatus(false),
+            // Initialize raw FFT-bin consistency telemetry as unchecked.
+            m_rawFftZeroMapChecked(false),
+            m_rawFftZeroMapMatch(false),
+            m_mappingParametersMatch(false),
+            m_rawFftShadowChecked(false),
+            m_sinkMappingSpreadFactor(0U),
+            m_sinkMappingDeBits(0U),
+            m_sinkMappingFftInterpolation(0U),
+            m_sinkMappingEffectiveSymbols(0U),
+            m_decoderMappingSpreadFactor(0U),
+            m_decoderMappingDeBits(0U),
+            m_decoderMappingFftInterpolation(0U),
+            m_decoderMappingEffectiveSymbols(0U),
             m_pipelineId(-1)
         { }
     };

@@ -92,7 +92,7 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
         m_minRequiredPreambleChirps,
         std::min(ctorTargetRequired, m_maxRequiredPreambleChirps)
     );
-    m_fftInterpolation = m_loRaFFTInterpolation;
+    m_fftInterpolation = MeshtasticDemodDecoderLoRa::loRaFFTInterpolation;
 
     initSF(m_settings.m_spreadFactor, m_settings.m_deBits);
 }
@@ -284,36 +284,6 @@ unsigned int MeshtasticDemodSink::argmax(
     }
 
     return imax;
-}
-
-unsigned int MeshtasticDemodSink::evalSymbol(unsigned int rawSymbol, bool headerSymbol)
-{
-    unsigned int spread = m_fftInterpolation * (1U << m_settings.m_deBits);
-    const unsigned int symbolBins = m_fftInterpolation * m_nbSymbols;
-
-    if (symbolBins == 0U) {
-        return rawSymbol;
-    }
-
-    // In gr-lora_sdr, explicit-header symbols are always reduced by 2 extra bits
-    // (sf_app = sf-2), independently of payload LDRO selection.
-    if (headerSymbol)
-    {
-        const int de = m_settings.m_deBits;
-        if (de < 2) {
-            spread <<= (2 - de);
-        }
-    }
-
-    // Match gr-lora_sdr hard-decoding symbol mapping:
-    //   s = mod(raw_bin - 1, 2^SF * os_factor) / (os_factor * 2^DE)
-    const unsigned int shifted = (rawSymbol + symbolBins - 1U) % symbolBins;
-
-    if (spread == 0U) {
-        return shifted;
-    }
-
-    return shifted / spread;
 }
 
 void MeshtasticDemodSink::tryHeaderLock()
@@ -1133,6 +1103,15 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             m_loRaFrameId++;
             m_decodeMsg = MeshtasticDemodMsg::MsgDecodeSymbols::create();
             m_decodeMsg->setFrameId(m_loRaFrameId);
+
+            // Carry the exact sink mapping parameters with this LoRa frame.
+            m_decodeMsg->setLoRaMappingParameters(
+                static_cast<unsigned int>(m_settings.m_spreadFactor),
+                static_cast<unsigned int>(m_settings.m_deBits),
+                m_fftInterpolation,
+                m_nbSymbolsEff
+            );
+
             {
                 // LoRa sync word is encoded across two net-ID chirps.
                 // First chirp (index 0) carries the high nibble, second (index 1) the low nibble.
@@ -1175,7 +1154,20 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
     std::vector<float> symbolMags;
     const unsigned int rawSymbol = getLoRaSymbolVal(m_loRaInDown.data(), m_loRaPayloadDownchirp.data(), &symbolMags, true);
     const bool headerSymbol = m_loRaFrameSymbolCount < 8U;
-    const unsigned short symbol = evalSymbol(rawSymbol, headerSymbol) % m_nbSymbolsEff;
+
+    // Convert the FFT peak with the shared LoRa mapping and preserve its diagnostic values.
+    unsigned int shiftedBin = 0U;
+    unsigned int symbolSpread = 0U;
+    const unsigned int evaluatedSymbol = MeshtasticDemodDecoderLoRa::mapRawFftBinToSymbol(
+        rawSymbol,
+        headerSymbol,
+        static_cast<unsigned int>(m_settings.m_spreadFactor),
+        static_cast<unsigned int>(m_settings.m_deBits),
+        m_fftInterpolation,
+        &shiftedBin,
+        &symbolSpread
+    );
+    const unsigned short symbol = static_cast<unsigned short>(evaluatedSymbol % m_nbSymbolsEff);
 
     // Save the original FFT peak bin before normal LoRa symbol conversion.
     m_decodeMsg->pushBackRawFftBin(rawSymbol);
@@ -1202,24 +1194,12 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
         static_cast<float>(diagnosticSampleMeanPower)
     );
 
-    unsigned int symbolSpread = m_fftInterpolation * (1U << m_settings.m_deBits);
-    const unsigned int symbolBins = m_fftInterpolation * m_nbSymbols;
-
-    if (headerSymbol)
-    {
-        const int de = m_settings.m_deBits;
-        if (de < 2) {
-            symbolSpread <<= (2 - de);
-        }
-    }
-
+    // Reuse the same intermediate values returned by the shared LoRa mapper.
     MeshtasticDemodMsg::SymbolMappingDiagnostic mappingDiagnostic;
     mappingDiagnostic.rawSymbol = rawSymbol;
-    mappingDiagnostic.shiftedBin = symbolBins > 0U
-        ? (rawSymbol + symbolBins - 1U) % symbolBins
-        : rawSymbol;
+    mappingDiagnostic.shiftedBin = shiftedBin;
     mappingDiagnostic.spread = symbolSpread;
-    mappingDiagnostic.evaluatedSymbol = evalSymbol(rawSymbol, headerSymbol);
+    mappingDiagnostic.evaluatedSymbol = evaluatedSymbol;
     mappingDiagnostic.decoderSymbol = symbol;
     mappingDiagnostic.headerSymbol = headerSymbol;
     mappingDiagnostic.cfoInt = m_loRaCFOInt;
@@ -1337,6 +1317,17 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
 
 void MeshtasticDemodSink::applySettings(const MeshtasticDemodSettings& settings, bool force)
 {
+    // Reject invalid LoRa width settings before unsigned symbol-width arithmetic.
+    if ((settings.m_spreadFactor <= 0)
+        || (settings.m_deBits < 0)
+        || (settings.m_deBits >= settings.m_spreadFactor))
+    {
+        qWarning() << "MeshtasticDemodSink::applySettings: rejecting invalid LoRa parameters"
+                   << "spreadFactor=" << settings.m_spreadFactor
+                   << "deBits=" << settings.m_deBits;
+        return;
+    }
+
     qDebug() << "MeshtasticDemodSink::applySettings:"
             << " m_inputFrequencyOffset: " << settings.m_inputFrequencyOffset
             << " m_bandwidthIndex: " << settings.m_bandwidthIndex
@@ -1345,7 +1336,7 @@ void MeshtasticDemodSink::applySettings(const MeshtasticDemodSettings& settings,
             << " m_title: " << settings.m_title
             << " force: " << force;
 
-    const unsigned int desiredFFTInterpolation = m_loRaFFTInterpolation;
+    const unsigned int desiredFFTInterpolation = MeshtasticDemodDecoderLoRa::loRaFFTInterpolation;
     const bool fftInterpChanged = desiredFFTInterpolation != m_fftInterpolation;
 
     if ((settings.m_spreadFactor != m_settings.m_spreadFactor)
