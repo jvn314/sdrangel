@@ -92,6 +92,7 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
         m_minRequiredPreambleChirps,
         std::min(ctorTargetRequired, m_maxRequiredPreambleChirps)
     );
+    // Use the shared LoRa interpolation value for sink mapping and shadow reconstruction.
     m_fftInterpolation = MeshtasticDemodDecoderLoRa::loRaFFTInterpolation;
 
     initSF(m_settings.m_spreadFactor, m_settings.m_deBits);
@@ -1336,6 +1337,7 @@ void MeshtasticDemodSink::applySettings(const MeshtasticDemodSettings& settings,
             << " m_title: " << settings.m_title
             << " force: " << force;
 
+    // Keep runtime interpolation on the same shared LoRa value used by the decoder.
     const unsigned int desiredFFTInterpolation = MeshtasticDemodDecoderLoRa::loRaFFTInterpolation;
     const bool fftInterpChanged = desiredFFTInterpolation != m_fftInterpolation;
 
