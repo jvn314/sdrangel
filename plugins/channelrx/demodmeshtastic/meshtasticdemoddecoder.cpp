@@ -753,6 +753,11 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
             for (int delta : {-1, 1})
             {
+                // DECODER BEHAVIOR CHANGE: every whole-shift candidate starts
+                // from the same pre-retry decoder state so the -1 probe cannot
+                // contaminate the subsequent +1 production candidate.
+                restoreLoRaState(preRetryState);
+
                 MeshtasticDemodMsg::DecodeAttemptDiagnostic& attempt =
                     (delta == -1) ? wholeMinus1Attempt : wholePlus1Attempt;
                 std::vector<unsigned short> shifted = msg.getSymbols();
@@ -780,25 +785,21 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     decodePlus1Bytes = shiftedState.bytes;
                 }
 
-                // DECODER BEHAVIOR CHANGE: whole-shift candidates re-decode the
-                // header, so acceptance now requires that fresh header to validate
-                // and assert CRC-present before a computed payload CRC may accept it.
-                if (shiftedTrace.headerCRCComputed
+                const bool candidatePassed =
+                    shiftedTrace.headerCRCComputed
                     && shiftedState.headerCRCStatus
                     && shiftedState.hasCRC
                     && shiftedTrace.payloadCRCComputed
-                    && shiftedState.payloadCRCStatus)
+                    && shiftedState.payloadCRCStatus;
+
+                // DECODER BEHAVIOR CHANGE: keep whole -1 as an instrumented
+                // probe, but never allow it to accept a frame. Only the +1
+                // candidate remains eligible for production recovery.
+                if ((delta == 1) && candidatePassed)
                 {
                     restoreLoRaState(shiftedState);
-                    decodePath = (delta == -1)
-                        ? QStringLiteral("minus1_bin")
-                        : QStringLiteral("plus1_bin");
+                    decodePath = QStringLiteral("plus1_bin");
                     recovered = true;
-
-                    if (delta == -1) {
-                        wholePlus1Attempt.stopReason = QStringLiteral("prior_attempt_passed");
-                    }
-
                     break;
                 }
             }
