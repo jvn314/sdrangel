@@ -840,6 +840,22 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
                 [&](int residue) { return residue == residueVector.front(); });
         packetMetadata["header_raw_residue_uniform"] = residueUniform;
 
+        // Report the FFT-bin correction indicated by the 8-symbol header, independent of decode success.
+        QString binfix = QStringLiteral("n/a");
+        if (residueUniform && (msg.getHeaderRawResidueModulus() == 4U))
+        {
+            const int residueMode = msg.getHeaderRawResidueMode();
+
+            if (residueMode == 0) {
+                binfix = QStringLiteral("+1");
+            } else if (residueMode == 1) {
+                binfix = QStringLiteral("0");
+            } else if (residueMode == 2) {
+                binfix = QStringLiteral("-1");
+            }
+        }
+        packetMetadata["binfix"] = binfix;
+
         QJsonArray headerRawResidues;
         for (int residue : msg.getHeaderRawResidues()) {
             headerRawResidues.append(residue);
