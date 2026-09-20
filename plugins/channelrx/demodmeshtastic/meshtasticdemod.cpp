@@ -607,14 +607,23 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
 
     // RF
     QJsonObject rf;
-    rf["center_freq_hz"]  = static_cast<qint64>(
-        m_basebandCenterFrequency + m_settings.m_inputFrequencyOffset);
-    rf["bandwidth_hz"]    = MeshtasticDemodSettings::bandwidths[m_settings.m_bandwidthIndex];
-    rf["spreading_factor"] = m_settings.m_spreadFactor;
-    rf["signal_db"]       = msg.getSingalDb();
-    rf["noise_db"]        = msg.getNoiseDb();
-    rf["snr_db"]          = msg.getSingalDb() - msg.getNoiseDb();
+    // Report RF center, bandwidth, and spreading factor at frame capture time.
+    // Do not reconstruct these values from current channel settings.
+    rf["center_freq_hz"]   = static_cast<qint64>(msg.getCenterFrequencyHz());
+    rf["bandwidth_hz"]     = static_cast<int>(msg.getBandwidthHz());
+    rf["spreading_factor"] = static_cast<int>(msg.getSpreadFactor());
+    rf["signal_db"]        = msg.getSingalDb();
+    rf["noise_db"]         = msg.getNoiseDb();
+    rf["snr_db"]           = msg.getSingalDb() - msg.getNoiseDb();
     root["rf"] = rf;
+
+    // Identify the decoding pipeline that produced this packet using the
+    // pipeline ID, name, and preset associated with the captured frame.
+    QJsonObject pipeline;
+    pipeline["id"]     = msg.getPipelineId();
+    pipeline["name"]   = msg.getPipelineName();
+    pipeline["preset"] = msg.getPipelinePreset();
+    root["pipeline"] = pipeline;
 
     // LoRa
     const uint8_t syncWord  = static_cast<uint8_t>(msg.getSyncWord());
@@ -738,7 +747,9 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
 
         if (meshResult.dataDecoded)
         {
-            mesh["channel_type"] = m_settings.m_meshtasticPresetName;
+            // Report the Meshtastic preset at frame capture time rather than the
+            // current channel setting.
+            mesh["channel_type"] = msg.getPipelinePreset();
 
             QJsonObject fields;
             for (const auto& field : meshResult.fields)
