@@ -298,11 +298,39 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             decodeSymbols(msg.getSymbols(), msgBytes);
         }
 
+        // Classify the base decode before recovery.
+        // na = bin-recovery classification does not apply.
+        QString binFix = QStringLiteral("na");
+
+        if (m_hasCRC)
+        {
+            if (m_payloadCRCStatus)
+            {
+                // c0 = base decode passed without bin correction.
+                binFix = QStringLiteral("c0");
+            }
+            else
+            {
+                // fn = decode failed before the recovery path was entered.
+                binFix = QStringLiteral("fn");
+            }
+        }
+        else if (m_hasHeader && !m_headerCRCStatus)
+        {
+            // Explicit header failed validation, so its decoded CRC-enable bit is untrusted.
+            // If that bit decoded as zero, the current recovery gate prevents a retry.
+            // fn = decode failed before the recovery path was entered.
+            binFix = QStringLiteral("fn");
+        }
+
         // Symbol recovery retries packets that fail the normal CRC path.
         // The 8-symbol header is quantized more coarsely than the payload.
         // Therefore +1 shifts both regions, while -1 preserves the header and shifts the payload.
         if (m_hasCRC && !m_payloadCRCStatus && (m_spreadFactor >= 5U))
         {
+            // fr = recovery was attempted but neither correction has validated yet.
+            binFix = QStringLiteral("fr");
+
             const LoRaDecodeState baseState = captureLoRaState(msgBytes);
             const unsigned int headerNbSymbolBits = (m_hasHeader && (m_spreadFactor > 2U))
                 ? (m_spreadFactor - 2U)
@@ -335,6 +363,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     && shiftedState.payloadCRCStatus)
                 {
                     restoreLoRaState(shiftedState);
+                    // cp = +1 symbol correction produced a CRC-valid decode.
+                    binFix = QStringLiteral("cp");
                     recovered = true;
                 }
             }
@@ -364,6 +394,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     && shiftedState.payloadCRCStatus)
                 {
                     restoreLoRaState(shiftedState);
+                    // cn = -1 payload-symbol correction produced a CRC-valid decode.
+                    binFix = QStringLiteral("cn");
                     recovered = true;
                 }
             }
@@ -395,6 +427,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 m_payloadCRCStatus ? 1 : 0
             );
             MeshtasticDemodMsg::MsgReportDecodeBytes *outputMsg = MeshtasticDemodMsg::MsgReportDecodeBytes::create(msgBytes);
+            outputMsg->setBinFix(binFix);
             outputMsg->setFrameId(msg.getFrameId());
             outputMsg->setSyncWord(msgSyncWord);
             outputMsg->setSignalDb(msgSignalDb);

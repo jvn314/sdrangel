@@ -270,6 +270,16 @@ namespace MeshtasticDemodMsg
         bool getHeaderCRCStatus() const { return m_headerCRCStatus; }
         int getPayloadParityStatus() const { return m_payloadParityStatus; }
         bool getPayloadCRCStatus() const { return m_payloadCRCStatus; }
+
+        // FFT-bin recovery outcome for this packet:
+        // c0 = base decode passed without bin correction
+        // cp = +1 symbol correction produced a CRC-valid decode
+        // cn = -1 payload-symbol correction produced a CRC-valid decode
+        // fr = recovery was attempted but neither correction validated
+        // fn = decode failed before the recovery path was entered
+        // na = bin-recovery classification does not apply
+        const QString& getBinFix() const { return m_binFix; }
+
         int getPipelineId() const { return m_pipelineId; }
         const QString& getPipelineName() const { return m_pipelineName; }
         const QString& getPipelinePreset() const { return m_pipelinePreset; }
@@ -323,6 +333,9 @@ namespace MeshtasticDemodMsg
         void setPayloadCRCStatus(bool payloadCRCStatus) {
             m_payloadCRCStatus = payloadCRCStatus;
         }
+        void setBinFix(const QString& binFix) {
+            m_binFix = binFix;
+        }
         void setPipelineMetadata(int pipelineId, const QString& pipelineName, const QString& pipelinePreset) {
             m_pipelineId = pipelineId;
             m_pipelineName = pipelineName;
@@ -349,6 +362,7 @@ namespace MeshtasticDemodMsg
         bool m_headerCRCStatus;
         int m_payloadParityStatus;
         bool m_payloadCRCStatus;
+        QString m_binFix;
         int m_pipelineId;
         QString m_pipelineName;
         QString m_pipelinePreset;
@@ -371,6 +385,8 @@ namespace MeshtasticDemodMsg
             m_headerCRCStatus(false),
             m_payloadParityStatus((int) MeshtasticDemodSettings::ParityUndefined),
             m_payloadCRCStatus(false),
+            // na = bin-recovery classification does not apply.
+            m_binFix(QStringLiteral("na")),
             m_pipelineId(-1)
         { }
     };

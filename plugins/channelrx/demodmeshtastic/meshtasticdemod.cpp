@@ -620,6 +620,10 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         lora["payload_crc"] = msg.getPayloadCRCStatus() ? QStringLiteral("ok") : QStringLiteral("err");
     }
 
+    // Report how the final LoRa decode was obtained.
+    // This is diagnostic only; the recovery gate itself is unchanged.
+    lora["binfix"]        = msg.getBinFix();
+
     lora["early_eom"]     = msg.getEarlyEOM();
     lora["packet_length"] = static_cast<int>(msg.getPacketSize());
     lora["nb_symbols"]    = static_cast<int>(msg.getNbSymbols());
