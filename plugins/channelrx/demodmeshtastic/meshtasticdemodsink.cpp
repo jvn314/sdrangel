@@ -1113,6 +1113,15 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             m_loRaFrameId++;
             m_decodeMsg = MeshtasticDemodMsg::MsgDecodeSymbols::create();
             m_decodeMsg->setFrameId(m_loRaFrameId);
+            // Freeze the RF and pipeline configuration that produced this frame.
+            // Later channel or pipeline reconfiguration must not change the
+            // provenance reported for this already-created frame.
+            m_decodeMsg->setRFMetadata(
+                m_deviceCenterFrequency + m_settings.m_inputFrequencyOffset,
+                static_cast<unsigned int>(m_bandwidth),
+                static_cast<unsigned int>(m_settings.m_spreadFactor),
+                m_settings.m_meshtasticPresetName
+            );
             {
                 // LoRa sync word is encoded across two net-ID chirps.
                 // First chirp (index 0) carries the high nibble, second (index 1) the low nibble.

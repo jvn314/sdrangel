@@ -66,6 +66,7 @@ public:
     double getCurrentNoiseLevel() const { return m_sink.getCurrentNoiseLevel(); }
     double getTotalPower() const { return m_sink.getTotalPower(); }
     void setBasebandSampleRate(int sampleRate);
+    void setDeviceCenterFrequency(qint64 centerFrequency) { m_sink.setDeviceCenterFrequency(centerFrequency); }
     void setDecoderMessageQueue(MessageQueue *messageQueue) { m_sink.setDecoderMessageQueue(messageQueue); }
     void setSpectrumSink(BasebandSampleSink* spectrumSink) { m_sink.setSpectrumSink(spectrumSink); }
     void setFifoLabel(const QString& label) { m_sampleFifo.setLabel(label); }

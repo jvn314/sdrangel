@@ -443,7 +443,16 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             outputMsg->setHeaderCRCStatus(getHeaderCRCStatus());
             outputMsg->setPayloadParityStatus(getPayloadParityStatus());
             outputMsg->setPayloadCRCStatus(getPayloadCRCStatus());
-            outputMsg->setPipelineMetadata(m_pipelineId, m_pipelineName, m_pipelinePreset);
+            // Preserve the sink's frame-time RF snapshot unchanged through the
+            // decoder/report boundary.
+            outputMsg->setRFMetadata(
+                msg.getCenterFrequencyHz(),
+                msg.getBandwidthHz(),
+                msg.getSpreadFactor()
+            );
+            // Pipeline ID and name identify the runtime, but the preset is frame-time
+            // configuration provenance and therefore comes from the frame snapshot.
+            outputMsg->setPipelineMetadata(m_pipelineId, m_pipelineName, msg.getPipelinePreset());
             outputMsg->setDechirpedSpectrum(msg.getDechirpedSpectrum());
             m_outputMessageQueue->push(outputMsg);
         }

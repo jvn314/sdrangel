@@ -40,6 +40,10 @@ namespace MeshtasticDemodMsg
         unsigned int getSyncWord() const { return m_syncWord; }
         float getSingalDb() const { return m_signalDb; }
         float getNoiseDb() const { return m_noiseDb; }
+        qint64 getCenterFrequencyHz() const { return m_centerFrequencyHz; }
+        unsigned int getBandwidthHz() const { return m_bandwidthHz; }
+        unsigned int getSpreadFactor() const { return m_spreadFactor; }
+        const QString& getPipelinePreset() const { return m_pipelinePreset; }
 
         void pushBackSymbol(unsigned short symbol) {
             m_symbols.push_back(symbol);
@@ -58,6 +62,12 @@ namespace MeshtasticDemodMsg
         }
         void setFrameId(uint32_t frameId) {
             m_frameId = frameId;
+        }
+        void setRFMetadata(qint64 centerFrequencyHz, unsigned int bandwidthHz, unsigned int spreadFactor, const QString& pipelinePreset) {
+            m_centerFrequencyHz = centerFrequencyHz;
+            m_bandwidthHz = bandwidthHz;
+            m_spreadFactor = spreadFactor;
+            m_pipelinePreset = pipelinePreset;
         }
 
         void pushBackMagnitudes(const std::vector<float>& magnitudes) {
@@ -93,20 +103,35 @@ namespace MeshtasticDemodMsg
         unsigned int m_syncWord;
         float m_signalDb;
         float m_noiseDb;
+        // RF and pipeline metadata frozen when the sink creates the frame.
+        // These values describe the configuration that actually produced the
+        // frame and must not be reconstructed later from mutable channel state.
+        qint64 m_centerFrequencyHz;
+        unsigned int m_bandwidthHz;
+        unsigned int m_spreadFactor;
+        QString m_pipelinePreset;
 
         MsgDecodeSymbols() : //!< create an empty message
             Message(),
             m_frameId(0),
             m_syncWord(0),
             m_signalDb(0.0),
-            m_noiseDb(0.0)
+            m_noiseDb(0.0),
+            m_centerFrequencyHz(0),
+            m_bandwidthHz(0),
+            m_spreadFactor(0),
+            m_pipelinePreset()
         {}
         MsgDecodeSymbols(const std::vector<unsigned short> symbols) : //!< create a message with symbols copy
             Message(),
             m_frameId(0),
             m_syncWord(0),
             m_signalDb(0.0),
-            m_noiseDb(0.0)
+            m_noiseDb(0.0),
+            m_centerFrequencyHz(0),
+            m_bandwidthHz(0),
+            m_spreadFactor(0),
+            m_pipelinePreset()
         { m_symbols = symbols; }
     };
 
@@ -283,6 +308,9 @@ namespace MeshtasticDemodMsg
         int getPipelineId() const { return m_pipelineId; }
         const QString& getPipelineName() const { return m_pipelineName; }
         const QString& getPipelinePreset() const { return m_pipelinePreset; }
+        qint64 getCenterFrequencyHz() const { return m_centerFrequencyHz; }
+        unsigned int getBandwidthHz() const { return m_bandwidthHz; }
+        unsigned int getSpreadFactor() const { return m_spreadFactor; }
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
 
         static MsgReportDecodeBytes* create(const QByteArray& bytes) {
@@ -341,6 +369,11 @@ namespace MeshtasticDemodMsg
             m_pipelineName = pipelineName;
             m_pipelinePreset = pipelinePreset;
         }
+        void setRFMetadata(qint64 centerFrequencyHz, unsigned int bandwidthHz, unsigned int spreadFactor) {
+            m_centerFrequencyHz = centerFrequencyHz;
+            m_bandwidthHz = bandwidthHz;
+            m_spreadFactor = spreadFactor;
+        }
         void setDechirpedSpectrum(const std::vector<std::vector<float>>& dechirpedSpectrum) {
             m_dechirpedSpectrum = dechirpedSpectrum;
         }
@@ -366,6 +399,11 @@ namespace MeshtasticDemodMsg
         int m_pipelineId;
         QString m_pipelineName;
         QString m_pipelinePreset;
+        // Frame-time RF provenance copied unchanged from MsgDecodeSymbols.
+        // Do not reconstruct these values from decoder or channel settings.
+        qint64 m_centerFrequencyHz;
+        unsigned int m_bandwidthHz;
+        unsigned int m_spreadFactor;
         std::vector<std::vector<float>> m_dechirpedSpectrum;
 
         MsgReportDecodeBytes(const QByteArray& bytes) :
@@ -387,7 +425,10 @@ namespace MeshtasticDemodMsg
             m_payloadCRCStatus(false),
             // na = bin-recovery classification does not apply.
             m_binFix(QStringLiteral("na")),
-            m_pipelineId(-1)
+            m_pipelineId(-1),
+            m_centerFrequencyHz(0),
+            m_bandwidthHz(0),
+            m_spreadFactor(0)
         { }
     };
 

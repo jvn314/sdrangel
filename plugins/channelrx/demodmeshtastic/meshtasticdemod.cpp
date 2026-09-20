@@ -320,6 +320,14 @@ void MeshtasticDemod::startPipelines(const std::vector<PipelineConfig>& configs)
             runtime.basebandSink->setBasebandSampleRate(m_basebandSampleRate);
         }
 
+        // This baseband object has already been moved to its worker thread, but
+        // the worker thread has not started and the runtime has not yet been
+        // published in m_pipelines. Seed the known device center now so the first
+        // frame cannot observe the sink's default 0 Hz value.
+        if (m_haveBasebandCenterFrequency) {
+            runtime.basebandSink->setDeviceCenterFrequency(m_basebandCenterFrequency);
+        }
+
         runtime.basebandSink->reset();
         runtime.basebandSink->setFifoLabel(QString("%1[%2]").arg(m_channelId).arg(config.name));
         runtime.basebandThread->start();
@@ -481,6 +489,15 @@ void MeshtasticDemod::applyExtraPipelineSettings(const QVector<MeshtasticDemodSe
             if (m_basebandSampleRate != 0) {
                 runtime.basebandSink->setBasebandSampleRate(m_basebandSampleRate);
             }
+
+            // This baseband object has already been moved to its worker thread, but
+            // the worker thread has not started and the runtime has not yet been
+            // published in m_pipelines. Seed the known device center now so the first
+            // frame cannot observe the sink's default 0 Hz value.
+            if (m_haveBasebandCenterFrequency) {
+                runtime.basebandSink->setDeviceCenterFrequency(m_basebandCenterFrequency);
+            }
+
             runtime.basebandSink->reset();
             runtime.basebandSink->setFifoLabel(QString("%1[%2]").arg(m_channelId).arg(config.name));
             runtime.basebandThread->start();
