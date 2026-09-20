@@ -615,6 +615,28 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     rf["signal_db"]        = msg.getSingalDb();
     rf["noise_db"]         = msg.getNoiseDb();
     rf["snr_db"]           = msg.getSingalDb() - msg.getNoiseDb();
+
+    // Temporary frame identifier for correlating JSON with sink and decoder
+    // diagnostics.
+    rf["temp_frame_id"] = static_cast<qint64>(msg.getFrameId());
+
+    // RF state captured with the frame.
+    rf["temp_sink_device_center_freq_hz"] =
+        static_cast<qint64>(msg.getTempDeviceCenterFrequencyHz());
+    rf["temp_sink_input_frequency_offset_hz"] =
+        static_cast<int>(msg.getTempInputFrequencyOffsetHz());
+    rf["temp_sink_channel_frequency_offset_hz"] =
+        static_cast<int>(msg.getTempChannelFrequencyOffsetHz());
+
+    // Current channel state at JSON generation time. These fields reproduce
+    // the sources previously used for permanent packet metadata so they can
+    // be compared with the RF state captured with the frame.
+    rf["temp_current_center_freq_hz"] = static_cast<qint64>(
+        m_basebandCenterFrequency + m_settings.m_inputFrequencyOffset);
+    rf["temp_current_bandwidth_hz"] = static_cast<int>(
+        MeshtasticDemodSettings::bandwidths[m_settings.m_bandwidthIndex]);
+    rf["temp_current_spreading_factor"] = static_cast<int>(m_settings.m_spreadFactor);
+
     root["rf"] = rf;
 
     // Identify the decoding pipeline that produced this packet using the
@@ -744,6 +766,10 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         mesh["decryption"] = decryption;
         mesh["key_label"]  = keyLabelOut;
         mesh["parsed"]     = meshResult.dataDecoded;
+
+        // Current channel preset at JSON generation time for comparison with the
+        // preset captured with the frame.
+        mesh["temp_current_channel_type"] = m_settings.m_meshtasticPresetName;
 
         if (meshResult.dataDecoded)
         {

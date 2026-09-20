@@ -44,6 +44,9 @@ namespace MeshtasticDemodMsg
         unsigned int getBandwidthHz() const { return m_bandwidthHz; }
         unsigned int getSpreadFactor() const { return m_spreadFactor; }
         const QString& getPipelinePreset() const { return m_pipelinePreset; }
+        qint64 getTempDeviceCenterFrequencyHz() const { return m_tempDeviceCenterFrequencyHz; }
+        int getTempInputFrequencyOffsetHz() const { return m_tempInputFrequencyOffsetHz; }
+        int getTempChannelFrequencyOffsetHz() const { return m_tempChannelFrequencyOffsetHz; }
 
         void pushBackSymbol(unsigned short symbol) {
             m_symbols.push_back(symbol);
@@ -68,6 +71,11 @@ namespace MeshtasticDemodMsg
             m_bandwidthHz = bandwidthHz;
             m_spreadFactor = spreadFactor;
             m_pipelinePreset = pipelinePreset;
+        }
+        void setRFDiagnostics(qint64 deviceCenterFrequencyHz, int inputFrequencyOffsetHz, int channelFrequencyOffsetHz) {
+            m_tempDeviceCenterFrequencyHz = deviceCenterFrequencyHz;
+            m_tempInputFrequencyOffsetHz = inputFrequencyOffsetHz;
+            m_tempChannelFrequencyOffsetHz = channelFrequencyOffsetHz;
         }
 
         void pushBackMagnitudes(const std::vector<float>& magnitudes) {
@@ -110,6 +118,11 @@ namespace MeshtasticDemodMsg
         unsigned int m_bandwidthHz;
         unsigned int m_spreadFactor;
         QString m_pipelinePreset;
+        // Temporary RF diagnostics captured with the frame.
+        // These fields are for validation and investigation only.
+        qint64 m_tempDeviceCenterFrequencyHz;
+        int m_tempInputFrequencyOffsetHz;
+        int m_tempChannelFrequencyOffsetHz;
 
         MsgDecodeSymbols() : //!< create an empty message
             Message(),
@@ -120,7 +133,10 @@ namespace MeshtasticDemodMsg
             m_centerFrequencyHz(0),
             m_bandwidthHz(0),
             m_spreadFactor(0),
-            m_pipelinePreset()
+            m_pipelinePreset(),
+            m_tempDeviceCenterFrequencyHz(0),
+            m_tempInputFrequencyOffsetHz(0),
+            m_tempChannelFrequencyOffsetHz(0)
         {}
         MsgDecodeSymbols(const std::vector<unsigned short> symbols) : //!< create a message with symbols copy
             Message(),
@@ -131,7 +147,10 @@ namespace MeshtasticDemodMsg
             m_centerFrequencyHz(0),
             m_bandwidthHz(0),
             m_spreadFactor(0),
-            m_pipelinePreset()
+            m_pipelinePreset(),
+            m_tempDeviceCenterFrequencyHz(0),
+            m_tempInputFrequencyOffsetHz(0),
+            m_tempChannelFrequencyOffsetHz(0)
         { m_symbols = symbols; }
     };
 
@@ -311,6 +330,9 @@ namespace MeshtasticDemodMsg
         qint64 getCenterFrequencyHz() const { return m_centerFrequencyHz; }
         unsigned int getBandwidthHz() const { return m_bandwidthHz; }
         unsigned int getSpreadFactor() const { return m_spreadFactor; }
+        qint64 getTempDeviceCenterFrequencyHz() const { return m_tempDeviceCenterFrequencyHz; }
+        int getTempInputFrequencyOffsetHz() const { return m_tempInputFrequencyOffsetHz; }
+        int getTempChannelFrequencyOffsetHz() const { return m_tempChannelFrequencyOffsetHz; }
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
 
         static MsgReportDecodeBytes* create(const QByteArray& bytes) {
@@ -374,6 +396,11 @@ namespace MeshtasticDemodMsg
             m_bandwidthHz = bandwidthHz;
             m_spreadFactor = spreadFactor;
         }
+        void setRFDiagnostics(qint64 deviceCenterFrequencyHz, int inputFrequencyOffsetHz, int channelFrequencyOffsetHz) {
+            m_tempDeviceCenterFrequencyHz = deviceCenterFrequencyHz;
+            m_tempInputFrequencyOffsetHz = inputFrequencyOffsetHz;
+            m_tempChannelFrequencyOffsetHz = channelFrequencyOffsetHz;
+        }
         void setDechirpedSpectrum(const std::vector<std::vector<float>>& dechirpedSpectrum) {
             m_dechirpedSpectrum = dechirpedSpectrum;
         }
@@ -404,6 +431,10 @@ namespace MeshtasticDemodMsg
         qint64 m_centerFrequencyHz;
         unsigned int m_bandwidthHz;
         unsigned int m_spreadFactor;
+        // Temporary RF diagnostics copied unchanged from MsgDecodeSymbols.
+        qint64 m_tempDeviceCenterFrequencyHz;
+        int m_tempInputFrequencyOffsetHz;
+        int m_tempChannelFrequencyOffsetHz;
         std::vector<std::vector<float>> m_dechirpedSpectrum;
 
         MsgReportDecodeBytes(const QByteArray& bytes) :
@@ -428,7 +459,10 @@ namespace MeshtasticDemodMsg
             m_pipelineId(-1),
             m_centerFrequencyHz(0),
             m_bandwidthHz(0),
-            m_spreadFactor(0)
+            m_spreadFactor(0),
+            m_tempDeviceCenterFrequencyHz(0),
+            m_tempInputFrequencyOffsetHz(0),
+            m_tempChannelFrequencyOffsetHz(0)
         { }
     };
 

@@ -450,6 +450,13 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 msg.getBandwidthHz(),
                 msg.getSpreadFactor()
             );
+            // Preserve the temporary frame-capture RF diagnostics unchanged through
+            // the decoder/report boundary.
+            outputMsg->setRFDiagnostics(
+                msg.getTempDeviceCenterFrequencyHz(),
+                msg.getTempInputFrequencyOffsetHz(),
+                msg.getTempChannelFrequencyOffsetHz()
+            );
             // Pipeline ID and name identify the runtime, but the preset is frame-time
             // configuration provenance and therefore comes from the frame snapshot.
             outputMsg->setPipelineMetadata(m_pipelineId, m_pipelineName, msg.getPipelinePreset());

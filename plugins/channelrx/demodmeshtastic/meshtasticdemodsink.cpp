@@ -1122,6 +1122,13 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 static_cast<unsigned int>(m_settings.m_spreadFactor),
                 m_settings.m_meshtasticPresetName
             );
+            // Capture the raw RF state when the frame is captured for later
+            // comparison with the channel state present when JSON is generated.
+            m_decodeMsg->setRFDiagnostics(
+                m_deviceCenterFrequency,
+                m_settings.m_inputFrequencyOffset,
+                m_channelFrequencyOffset
+            );
             {
                 // LoRa sync word is encoded across two net-ID chirps.
                 // First chirp (index 0) carries the high nibble, second (index 1) the low nibble.
