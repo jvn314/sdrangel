@@ -767,16 +767,17 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         mesh["key_label"]  = keyLabelOut;
         mesh["parsed"]     = meshResult.dataDecoded;
 
+        // Report the Meshtastic preset captured with this frame. The preset
+        // describes the configuration that produced the frame and does not
+        // depend on successful Meshtastic payload parsing.
+        mesh["channel_type"] = msg.getPipelinePreset();
+
         // Current channel preset at JSON generation time for comparison with the
         // preset captured with the frame.
         mesh["temp_current_channel_type"] = m_settings.m_meshtasticPresetName;
 
         if (meshResult.dataDecoded)
         {
-            // Report the Meshtastic preset at frame capture time rather than the
-            // current channel setting.
-            mesh["channel_type"] = msg.getPipelinePreset();
-
             QJsonObject fields;
             for (const auto& field : meshResult.fields)
             {
