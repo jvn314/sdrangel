@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QTime>
+#include <QDateTime>
 #include <QDebug>
 #include <QStringList>
 #include <stdio.h>
@@ -79,7 +80,19 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
 	m_channelFrequencyOffset = 0;
     m_deviceCenterFrequency = 0;
 	m_nco.setFreq(m_channelFrequencyOffset, m_channelSampleRate);
-	m_interpolator.create(16, m_channelSampleRate, m_bandwidth / 1.9f);
+    {
+        const double cutoffHz = static_cast<double>(m_bandwidth) / 1.9;
+        qDebug().noquote()
+            << QStringLiteral("MESHTASTIC_INTERP_CREATE ts=%1 frame=%2 reason=ctor channel_sr=%3 requested_bw=%4 previous_bw=%5 force=1 old_cutoff_hz=%6 new_cutoff_hz=%7")
+                .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs))
+                .arg(m_loRaFrameId)
+                .arg(m_channelSampleRate)
+                .arg(m_bandwidth)
+                .arg(m_bandwidth)
+                .arg(cutoffHz, 0, 'f', 3)
+                .arg(cutoffHz, 0, 'f', 3);
+        m_interpolator.create(16, m_channelSampleRate, cutoffHz);
+    }
     m_interpolatorDistance = (Real) m_channelSampleRate / (Real) m_bandwidth;
     m_sampleDistanceRemain = 0;
     const unsigned int ctorConfiguredPreamble = m_settings.m_preambleChirps > 0U
@@ -1250,7 +1263,20 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
         const int targetFrameSyncRate = std::max(1, bandwidth * static_cast<int>(m_osFactor));
         // Keep the anti-alias/channel filter narrow around the configured LoRa bandwidth.
         // A too-wide cutoff destabilizes preamble bin tracking in DETECT.
-        m_interpolator.create(16, channelSampleRate, bandwidth / 1.9f);
+        const int previousBandwidth = m_bandwidth;
+        const double oldCutoffHz = static_cast<double>(previousBandwidth) / 1.9;
+        const double newCutoffHz = static_cast<double>(bandwidth) / 1.9;
+        qDebug().noquote()
+            << QStringLiteral("MESHTASTIC_INTERP_CREATE ts=%1 frame=%2 reason=apply channel_sr=%3 requested_bw=%4 previous_bw=%5 force=%6 old_cutoff_hz=%7 new_cutoff_hz=%8")
+                .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs))
+                .arg(m_loRaFrameId)
+                .arg(channelSampleRate)
+                .arg(bandwidth)
+                .arg(previousBandwidth)
+                .arg(force ? 1 : 0)
+                .arg(oldCutoffHz, 0, 'f', 3)
+                .arg(newCutoffHz, 0, 'f', 3);
+        m_interpolator.create(16, channelSampleRate, newCutoffHz);
         m_interpolatorDistance = (Real) channelSampleRate / (Real) targetFrameSyncRate;
         m_sampleDistanceRemain = 0;
         m_osCounter = 0;
