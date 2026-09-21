@@ -236,8 +236,12 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             m_payloadCRCStatus = s.payloadCRCStatus;
         };
 
+        const LoRaDecodeState entryState = captureLoRaState(QByteArray());
+        QString productionCandidateId = QStringLiteral("hard");
+
         if (canSoftDecode)
         {
+            productionCandidateId = QStringLiteral("soft");
             unsigned int headerNbSymbolBits;
 
             if (m_hasHeader && (m_spreadFactor > 2U)) {
@@ -288,6 +292,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
                 if (hardState.payloadCRCStatus) {
                     restoreLoRaState(hardState);
+                    productionCandidateId = QStringLiteral("hard");
                 } else {
                     restoreLoRaState(softState);
                 }
@@ -365,6 +370,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     restoreLoRaState(shiftedState);
                     // cp = +1 symbol correction produced a CRC-valid decode.
                     binFix = QStringLiteral("cp");
+                    productionCandidateId = QStringLiteral("plus1_bin");
                     recovered = true;
                 }
             }
@@ -396,6 +402,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                     restoreLoRaState(shiftedState);
                     // cn = -1 payload-symbol correction produced a CRC-valid decode.
                     binFix = QStringLiteral("cn");
+                    productionCandidateId = QStringLiteral("minus1_bin");
                     recovered = true;
                 }
             }
@@ -403,8 +410,271 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             // Restore the original decode state when neither CRC-validated correction succeeds.
             if (!recovered) {
                 restoreLoRaState(baseState);
+                productionCandidateId = QStringLiteral("NONE");
             }
         }
+
+        const LoRaDecodeState productionState = captureLoRaState(msgBytes);
+        const QString productionHeaderSource =
+            ((productionCandidateId == QStringLiteral("plus1_bin"))
+                || (productionCandidateId == QStringLiteral("minus1_bin")))
+            ? QStringLiteral("REDECODED")
+            : ((productionCandidateId == QStringLiteral("soft"))
+                || (productionCandidateId == QStringLiteral("hard")))
+                ? QStringLiteral("BASE_VALIDATED")
+                : QStringLiteral("NONE");
+
+        auto makeTempResult = [](const QString& sourceRef,
+                                 const QString& candidateId,
+                                 const QString& headerSource,
+                                 const QString& resultBinFix,
+                                 const LoRaDecodeState& state) {
+            MeshtasticDemodMsg::TempDecodePathResult result;
+            result.sourceRef = sourceRef;
+            result.candidateId = candidateId;
+            result.headerSource = headerSource;
+            result.binFix = resultBinFix;
+            result.bytes = state.bytes;
+            result.hasCRC = state.hasCRC;
+            result.nbParityBits = state.nbParityBits;
+            result.packetLength = state.packetLength;
+            result.nbSymbols = state.nbSymbols;
+            result.nbCodewords = state.nbCodewords;
+            result.earlyEOM = state.earlyEOM;
+            result.headerParityStatus = state.headerParityStatus;
+            result.headerCRCStatus = state.headerCRCStatus;
+            result.payloadParityStatus = state.payloadParityStatus;
+            result.payloadCRCStatus = state.payloadCRCStatus;
+            return result;
+        };
+
+        auto runHistoricalPath = [&](bool fftBinFixPolicy,
+                                     const QString& sourceRef) -> MeshtasticDemodMsg::TempDecodePathResult
+        {
+            restoreLoRaState(entryState);
+            QByteArray pathBytes;
+            QString candidateId = canSoftDecode ? QStringLiteral("soft") : QStringLiteral("hard");
+
+            if (canSoftDecode)
+            {
+                const unsigned int headerNbSymbolBits =
+                    (m_hasHeader && (m_spreadFactor > 2U))
+                    ? (m_spreadFactor - 2U)
+                    : m_nbSymbolBits;
+
+                MeshtasticDemodDecoderLoRa::decodeBytesSoft(
+                    pathBytes,
+                    msgMags,
+                    msg.getSymbols(),
+                    m_spreadFactor,
+                    m_loRaBandwidth,
+                    m_nbSymbolBits,
+                    headerNbSymbolBits,
+                    m_hasHeader,
+                    m_hasCRC,
+                    m_nbParityBits,
+                    m_packetLength,
+                    m_earlyEOM,
+                    m_headerParityStatus,
+                    m_headerCRCStatus,
+                    m_payloadParityStatus,
+                    m_payloadCRCStatus
+                );
+
+                MeshtasticDemodDecoderLoRa::getCodingMetrics(
+                    m_nbSymbolBits,
+                    headerNbSymbolBits,
+                    m_nbParityBits,
+                    m_packetLength,
+                    m_hasHeader,
+                    m_hasCRC,
+                    m_nbSymbols,
+                    m_nbCodewords
+                );
+
+                const LoRaDecodeState softState = captureLoRaState(pathBytes);
+
+                if (m_hasCRC && !m_payloadCRCStatus)
+                {
+                    QByteArray hardBytes;
+                    decodeSymbols(msg.getSymbols(), hardBytes);
+                    const LoRaDecodeState hardState = captureLoRaState(hardBytes);
+
+                    if (hardState.payloadCRCStatus)
+                    {
+                        pathBytes = hardBytes;
+                        restoreLoRaState(hardState);
+                        candidateId = QStringLiteral("hard");
+                    }
+                    else
+                    {
+                        pathBytes = softState.bytes;
+                        restoreLoRaState(softState);
+                        candidateId = QStringLiteral("soft");
+                    }
+                }
+            }
+            else
+            {
+                decodeSymbols(msg.getSymbols(), pathBytes);
+            }
+
+            QString pathBinFix = QStringLiteral("na");
+
+            if (m_hasCRC) {
+                pathBinFix = m_payloadCRCStatus ? QStringLiteral("c0") : QStringLiteral("fn");
+            } else if (m_hasHeader && !m_headerCRCStatus) {
+                pathBinFix = QStringLiteral("fn");
+            }
+
+            if (m_hasCRC && !m_payloadCRCStatus && (m_spreadFactor >= 5U))
+            {
+                pathBinFix = QStringLiteral("fr");
+                const LoRaDecodeState baseState = captureLoRaState(pathBytes);
+                const unsigned int headerNbSymbolBits =
+                    (m_hasHeader && (m_spreadFactor > 2U))
+                    ? (m_spreadFactor - 2U)
+                    : m_nbSymbolBits;
+                bool recovered = false;
+
+                if (!fftBinFixPolicy)
+                {
+                    // Exact recovery policy at merge-base 31b60d86:
+                    // try whole-frame -1 first, then whole-frame +1, and accept
+                    // any candidate whose payload CRC validates.
+                    for (int delta : {-1, 1})
+                    {
+                        restoreLoRaState(baseState);
+                        std::vector<unsigned short> shifted = msg.getSymbols();
+
+                        for (size_t i = 0; i < shifted.size(); ++i)
+                        {
+                            const bool isHeader = m_hasHeader && (i < 8U);
+                            const unsigned int bits = isHeader ? headerNbSymbolBits : m_nbSymbolBits;
+                            const unsigned int mod = 1U << std::max(1U, bits);
+                            const int s = static_cast<int>(shifted[i]);
+                            const int v = (s + delta) % static_cast<int>(mod);
+                            shifted[i] = static_cast<unsigned short>(
+                                v < 0 ? (v + static_cast<int>(mod)) : v);
+                        }
+
+                        QByteArray shiftedBytes;
+                        decodeSymbols(shifted, shiftedBytes);
+                        const LoRaDecodeState shiftedState = captureLoRaState(shiftedBytes);
+
+                        if (shiftedState.payloadCRCStatus)
+                        {
+                            pathBytes = shiftedBytes;
+                            restoreLoRaState(shiftedState);
+                            pathBinFix = delta < 0 ? QStringLiteral("cn") : QStringLiteral("cp");
+                            candidateId = delta < 0
+                                ? QStringLiteral("minus1_bin")
+                                : QStringLiteral("plus1_bin");
+                            recovered = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    // Exact recovery policy at fft-bin-fix b201d32a:
+                    // +1 across header+payload with hardened acceptance, then
+                    // -1 on payload only while preserving the original header.
+                    restoreLoRaState(baseState);
+                    std::vector<unsigned short> shifted = msg.getSymbols();
+
+                    for (size_t i = 0; i < shifted.size(); ++i)
+                    {
+                        const bool isHeader = m_hasHeader && (i < 8U);
+                        const unsigned int bits = isHeader ? headerNbSymbolBits : m_nbSymbolBits;
+                        const unsigned int mod = 1U << std::max(1U, bits);
+                        shifted[i] = static_cast<unsigned short>(
+                            (static_cast<int>(shifted[i]) + 1) % static_cast<int>(mod));
+                    }
+
+                    QByteArray shiftedBytes;
+                    decodeSymbols(shifted, shiftedBytes);
+                    LoRaDecodeState shiftedState = captureLoRaState(shiftedBytes);
+
+                    if ((!m_hasHeader || shiftedState.headerCRCStatus)
+                        && shiftedState.hasCRC
+                        && shiftedState.payloadCRCStatus)
+                    {
+                        pathBytes = shiftedBytes;
+                        restoreLoRaState(shiftedState);
+                        pathBinFix = QStringLiteral("cp");
+                        candidateId = QStringLiteral("plus1_bin");
+                        recovered = true;
+                    }
+
+                    if (!recovered)
+                    {
+                        restoreLoRaState(baseState);
+                        shifted = msg.getSymbols();
+
+                        for (size_t i = m_hasHeader ? 8U : 0U; i < shifted.size(); ++i)
+                        {
+                            const unsigned int mod = 1U << std::max(1U, m_nbSymbolBits);
+                            const int v = (static_cast<int>(shifted[i]) - 1) % static_cast<int>(mod);
+                            shifted[i] = static_cast<unsigned short>(
+                                v < 0 ? (v + static_cast<int>(mod)) : v);
+                        }
+
+                        shiftedBytes.clear();
+                        decodeSymbols(shifted, shiftedBytes);
+                        shiftedState = captureLoRaState(shiftedBytes);
+
+                        if ((!m_hasHeader || shiftedState.headerCRCStatus)
+                            && shiftedState.hasCRC
+                            && shiftedState.payloadCRCStatus)
+                        {
+                            pathBytes = shiftedBytes;
+                            restoreLoRaState(shiftedState);
+                            pathBinFix = QStringLiteral("cn");
+                            candidateId = QStringLiteral("minus1_bin");
+                            recovered = true;
+                        }
+                    }
+                }
+
+                if (!recovered)
+                {
+                    pathBytes = baseState.bytes;
+                    restoreLoRaState(baseState);
+                    candidateId = QStringLiteral("NONE");
+                }
+            }
+
+            const LoRaDecodeState finalState = captureLoRaState(pathBytes);
+            const QString headerSource =
+                ((candidateId == QStringLiteral("plus1_bin"))
+                    || (candidateId == QStringLiteral("minus1_bin")))
+                ? QStringLiteral("REDECODED")
+                : ((candidateId == QStringLiteral("soft"))
+                    || (candidateId == QStringLiteral("hard")))
+                    ? QStringLiteral("BASE_VALIDATED")
+                    : QStringLiteral("NONE");
+
+            return makeTempResult(sourceRef, candidateId, headerSource, pathBinFix, finalState);
+        };
+
+        MeshtasticDemodMsg::TempDecodeComparison tempComparison;
+        tempComparison.valid = true;
+        tempComparison.preBinfix = runHistoricalPath(
+            false,
+            QStringLiteral("31b60d86bfcf3e1b0d32ad5a1e4c5024a2e23706"));
+        tempComparison.fftBinfix = runHistoricalPath(
+            true,
+            QStringLiteral("b201d32ae9b6a9ffe6fc19a535f0e9e98facbed4"));
+        tempComparison.current = makeTempResult(
+            QStringLiteral("04df1b7c44dae418c8f69c620b9d2859e5114c26"),
+            productionCandidateId,
+            productionHeaderSource,
+            binFix,
+            productionState);
+
+        // Shadow decodes must never change production behavior or state.
+        restoreLoRaState(productionState);
 
         qDebug(
             "MeshtasticDemodDecoder::handleMessage: decode symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d",
@@ -461,6 +731,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             // configuration provenance and therefore comes from the frame snapshot.
             outputMsg->setPipelineMetadata(m_pipelineId, m_pipelineName, msg.getPipelinePreset());
             outputMsg->setDechirpedSpectrum(msg.getDechirpedSpectrum());
+            outputMsg->setTempDecodeComparison(tempComparison);
             m_outputMessageQueue->push(outputMsg);
         }
 
