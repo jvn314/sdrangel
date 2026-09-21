@@ -1512,8 +1512,8 @@ MeshtasticDemodSink::TempIqCapture *MeshtasticDemodSink::startTempIqCapture(uint
         m_tempIqPreRoll.end()
     );
 
-    const QString captureDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-        + QStringLiteral("/SDRangel/meshtastic-iq-captures");
+    const QString captureDir =
+        QStringLiteral("C:/Users/jvn31/decoder-iq-diagnostics/captures");
     QDir().mkpath(captureDir);
     const QString timestamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
     const QString uniqueSuffix = QUuid::createUuid().toString(QUuid::WithoutBraces);
