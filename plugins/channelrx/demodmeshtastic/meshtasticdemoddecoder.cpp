@@ -660,6 +660,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
 
         MeshtasticDemodMsg::TempDecodeComparison tempComparison;
         tempComparison.valid = true;
+        tempComparison.inputSymbols = msg.getSymbols();
+        tempComparison.inputMagnitudeRows = static_cast<unsigned int>(msgMags.size());
         tempComparison.preBinfix = runHistoricalPath(
             false,
             QStringLiteral("31b60d86bfcf3e1b0d32ad5a1e4c5024a2e23706"));

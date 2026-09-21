@@ -54,6 +54,8 @@ namespace MeshtasticDemodMsg
     struct TempDecodeComparison
     {
         bool valid = false;
+        std::vector<unsigned short> inputSymbols;
+        unsigned int inputMagnitudeRows = 0U;
         TempDecodePathResult preBinfix;
         TempDecodePathResult fftBinfix;
         TempDecodePathResult current;

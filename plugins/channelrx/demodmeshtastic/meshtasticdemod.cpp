@@ -32,6 +32,7 @@
 #include <QBuffer>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 
 #include <algorithm>
 #include <array>
@@ -711,6 +712,15 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         };
 
         QJsonObject tempDecodeCompare;
+        QJsonArray inputSymbols;
+
+        for (unsigned short symbol : tempCompare.inputSymbols) {
+            inputSymbols.append(static_cast<int>(symbol));
+        }
+
+        tempDecodeCompare["input_symbol_count"] = static_cast<int>(tempCompare.inputSymbols.size());
+        tempDecodeCompare["input_magnitude_rows"] = static_cast<int>(tempCompare.inputMagnitudeRows);
+        tempDecodeCompare["input_symbols"] = inputSymbols;
         tempDecodeCompare["pre_binfix"] = pathToJson(tempCompare.preBinfix);
         tempDecodeCompare["fft_binfix"] = pathToJson(tempCompare.fftBinfix);
         tempDecodeCompare["current"] = pathToJson(tempCompare.current);
