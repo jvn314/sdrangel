@@ -646,7 +646,7 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         iqCapture["sample_rate"] = static_cast<int>(msg.getTempIqCaptureSampleRate());
         iqCapture["pre_roll_samples"] = static_cast<int>(msg.getTempIqPreRollSamples());
         iqCapture["post_roll_samples"] = static_cast<int>(msg.getTempIqPostRollSamples());
-        iqCapture["capture_point"] = QStringLiteral("post_nco_interpolator_pre_processSampleLoRa");
+        iqCapture["capture_point"] = QStringLiteral("post_nco_pre_interpolator_channel_rate");
         rf["temp_iq_capture"] = iqCapture;
     }
 

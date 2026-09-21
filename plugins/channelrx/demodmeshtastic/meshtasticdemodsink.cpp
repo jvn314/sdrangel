@@ -213,6 +213,10 @@ void MeshtasticDemodSink::feed(const SampleVector::const_iterator& begin, const 
 		Complex c(it->real() / SDR_RX_SCALEF, it->imag() / SDR_RX_SCALEF);
 		c *= m_nco.nextIQ();
 
+        // Capture channel-rate IQ before the interpolator so replay can exercise
+        // historical anti-alias cutoff behavior, including 651ca8c0a.
+        updateTempIqCapture(c);
+
 		if (m_interpolator.decimate(&m_sampleDistanceRemain, c, &ci))
 		{
             if (MeshtasticDemodSettings::m_codingScheme == MeshtasticDemodSettings::CodingLoRa)
@@ -540,6 +544,9 @@ void MeshtasticDemodSink::resetLoRaFrameSync()
 {
     if (m_decodeMsg && (m_loRaState != LoRaStateDetect))
     {
+        // Preserve abandoned/invalid frames as replay evidence. Without this,
+        // their capture would remain live forever and grow without bound.
+        finalizeTempIqCapture(m_loRaFrameId);
         delete m_decodeMsg;
         m_decodeMsg = nullptr;
     }
@@ -808,7 +815,6 @@ void MeshtasticDemodSink::finalizeLoRaFrame()
 
 void MeshtasticDemodSink::processSampleLoRa(const Complex& ci)
 {
-    updateTempIqCapture(ci);
     m_loRaSampleFifo.push_back(ci);
 
     while (true)
@@ -1263,7 +1269,17 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
 
 void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
 {
-    const size_t preRollLimit = static_cast<size_t>(m_tempIqPreRollSymbols) * m_loRaSymbolSpan;
+    const unsigned int channelRate = static_cast<unsigned int>(std::max(1, m_channelSampleRate));
+    const unsigned int bandwidth = static_cast<unsigned int>(std::max(1, m_bandwidth));
+    const size_t channelSamplesPerSymbol = static_cast<size_t>(std::max(
+        1.0,
+        std::round(
+            static_cast<double>(channelRate)
+            * static_cast<double>(m_nbSymbols)
+            / static_cast<double>(bandwidth)
+        )
+    ));
+    const size_t preRollLimit = static_cast<size_t>(m_tempIqPreRollSymbols) * channelSamplesPerSymbol;
     m_tempIqPreRoll.push_back(ci);
 
     while ((preRollLimit > 0U) && (m_tempIqPreRoll.size() > preRollLimit)) {
@@ -1296,15 +1312,26 @@ MeshtasticDemodSink::TempIqCapture& MeshtasticDemodSink::startTempIqCapture(uint
 {
     TempIqCapture capture;
     capture.frameId = frameId;
+    const unsigned int channelRate = static_cast<unsigned int>(std::max(1, m_channelSampleRate));
+    const unsigned int bandwidth = static_cast<unsigned int>(std::max(1, m_bandwidth));
+    const size_t channelSamplesPerSymbol = static_cast<size_t>(std::max(
+        1.0,
+        std::round(
+            static_cast<double>(channelRate)
+            * static_cast<double>(m_nbSymbols)
+            / static_cast<double>(bandwidth)
+        )
+    ));
+
     capture.preRollSamples = static_cast<unsigned int>(m_tempIqPreRoll.size());
-    capture.postRollSamples = m_tempIqPostRollSymbols * m_loRaSymbolSpan;
+    capture.postRollSamples = static_cast<unsigned int>(
+        static_cast<size_t>(m_tempIqPostRollSymbols) * channelSamplesPerSymbol);
     capture.postRemaining = capture.postRollSamples;
-    capture.sampleRate = m_tempIqSampleRate > 0U
-        ? m_tempIqSampleRate
-        : static_cast<unsigned int>(std::max(1, m_bandwidth * static_cast<int>(m_osFactor)));
+    capture.sampleRate = channelRate;
     capture.samples.reserve(
         capture.preRollSamples
-        + static_cast<size_t>(m_settings.m_nbSymbolsMax + m_tempIqPostRollSymbols + 8U) * m_loRaSymbolSpan
+        + static_cast<size_t>(m_settings.m_nbSymbolsMax + m_tempIqPostRollSymbols + 8U)
+            * channelSamplesPerSymbol
     );
     capture.samples.insert(
         capture.samples.end(),
@@ -1424,7 +1451,7 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
         // Preserve the original float cutoff expression exactly; old/new
         // cutoff values above are diagnostics only.
         m_interpolator.create(16, channelSampleRate, bandwidth / 1.9f);
-        m_tempIqSampleRate = static_cast<unsigned int>(targetFrameSyncRate);
+        m_tempIqSampleRate = static_cast<unsigned int>(std::max(1, channelSampleRate));
         m_interpolatorDistance = (Real) channelSampleRate / (Real) targetFrameSyncRate;
         m_sampleDistanceRemain = 0;
         m_osCounter = 0;

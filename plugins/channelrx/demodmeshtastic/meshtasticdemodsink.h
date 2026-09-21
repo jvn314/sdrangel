@@ -131,7 +131,7 @@ private:
     static constexpr unsigned int m_tempIqPostRollSymbols = 4U;
     std::deque<Complex> m_tempIqPreRoll;
     std::vector<TempIqCapture> m_tempIqCaptures;
-    unsigned int m_tempIqSampleRate;
+    unsigned int m_tempIqSampleRate; //!< Channel-rate IQ capture sample rate (pre-interpolator)
 
     unsigned int m_osFactor;       //!< Oversampling factor at frame-sync input (gr-lora_sdr os_factor)
     unsigned int m_osCenterPhase;  //!< Selected downsample phase inside oversampled symbol
