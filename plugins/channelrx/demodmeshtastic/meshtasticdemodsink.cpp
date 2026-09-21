@@ -24,8 +24,10 @@
 #include <QStandardPaths>
 #include <QFile>
 #include <QDir>
+#include <QUuid>
 #include <stdio.h>
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <vector>
 #include <thread>
@@ -1332,14 +1334,18 @@ void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
         }
 
         // Safety cap for any frame-abandon path not handled elsewhere.
+        // The bound is frozen when the capture starts so later geometry changes
+        // cannot silently change this capture's LIMIT semantics.
         if (!capture.frameFinalized
-            && (capture.samples.size() >= m_tempIqMaxCaptureSamples))
+            && (capture.maxSamples > 0U)
+            && (capture.samples.size() >= capture.maxSamples))
         {
             qWarning().noquote()
                 << QStringLiteral("MESHTASTIC_IQ_CAPTURE_LIMIT frame=%1 samples=%2 max=%3")
                     .arg(capture.frameId)
                     .arg(capture.samples.size())
-                    .arg(m_tempIqMaxCaptureSamples);
+                    .arg(capture.maxSamples);
+            capture.truncated = true;
             capture.frameFinalized = true;
             capture.postRemaining = 0U;
         }
@@ -1367,7 +1373,8 @@ MeshtasticDemodSink::TempIqCapture& MeshtasticDemodSink::startTempIqCapture(uint
         static_cast<size_t>(m_tempIqPostRollSymbols) * m_tempIqChannelSamplesPerSymbol);
     capture.postRemaining = capture.postRollSamples;
     capture.sampleRate = m_tempIqSampleRate;
-    capture.samples.reserve(m_tempIqMaxCaptureSamples);
+    capture.maxSamples = m_tempIqMaxCaptureSamples;
+    capture.samples.reserve(capture.maxSamples);
     capture.samples.insert(
         capture.samples.end(),
         m_tempIqPreRoll.begin(),
@@ -1378,10 +1385,12 @@ MeshtasticDemodSink::TempIqCapture& MeshtasticDemodSink::startTempIqCapture(uint
         + QStringLiteral("/SDRangel/meshtastic-iq-captures");
     QDir().mkpath(captureDir);
     const QString timestamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
-    capture.filePath = QStringLiteral("%1/frame-%2-%3.cf32")
+    const QString uniqueSuffix = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    capture.filePath = QStringLiteral("%1/frame-%2-%3-%4.cf32")
         .arg(captureDir)
         .arg(frameId)
-        .arg(timestamp);
+        .arg(timestamp)
+        .arg(uniqueSuffix);
 
     m_tempIqCaptures.push_back(std::move(capture));
     return m_tempIqCaptures.back();
@@ -1410,19 +1419,47 @@ void MeshtasticDemodSink::writeTempIqCapture(TempIqCapture capture)
     // The completed capture owns its sample vector, so the worker does not
     // reference sink state after handoff.
     std::thread([capture = std::move(capture)]() mutable {
-        QFile file(capture.filePath);
+        const QString finalPath = capture.filePath;
+        const QString partPath = finalPath + QStringLiteral(".part");
+        constexpr size_t bytesPerSample = 2U * sizeof(float);
+        const size_t maxByteArrayBytes = static_cast<size_t>(std::numeric_limits<qsizetype>::max());
+
+        if ((capture.samples.size() > (maxByteArrayBytes / bytesPerSample)))
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 reason=size_overflow samples=%2 file=%3")
+                    .arg(capture.frameId)
+                    .arg(capture.samples.size())
+                    .arg(partPath);
+            return;
+        }
+
+        if (QFile::exists(finalPath) || QFile::exists(partPath))
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 reason=path_exists file=%2")
+                    .arg(capture.frameId)
+                    .arg(QFile::exists(finalPath) ? finalPath : partPath);
+            return;
+        }
+
+        const qsizetype expectedBytes =
+            static_cast<qsizetype>(capture.samples.size() * bytesPerSample);
+
+        QFile file(partPath);
 
         if (!file.open(QIODevice::WriteOnly))
         {
             qWarning().noquote()
-                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 file=%2")
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 reason=open file=%2 error=%3")
                     .arg(capture.frameId)
-                    .arg(capture.filePath);
+                    .arg(partPath)
+                    .arg(file.errorString());
             return;
         }
 
         QByteArray raw;
-        raw.resize(static_cast<qsizetype>(capture.samples.size() * 2U * sizeof(float)));
+        raw.resize(expectedBytes);
         char *dst = raw.data();
 
         for (const Complex& sample : capture.samples)
@@ -1442,7 +1479,59 @@ void MeshtasticDemodSink::writeTempIqCapture(TempIqCapture capture)
         }
 
         const qint64 written = file.write(raw);
+        const bool flushOk = file.flush();
+        const QString writeError = file.errorString();
         file.close();
+
+        const bool fullWrite =
+            (written == static_cast<qint64>(expectedBytes)) && flushOk;
+
+        if (!fullWrite)
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 reason=incomplete expected=%2 written=%3 flush=%4 file=%5 error=%6")
+                    .arg(capture.frameId)
+                    .arg(expectedBytes)
+                    .arg(written)
+                    .arg(flushOk ? 1 : 0)
+                    .arg(partPath)
+                    .arg(writeError);
+            return;
+        }
+
+        if (capture.truncated)
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_INCOMPLETE frame=%1 reason=truncated samples=%2 sample_rate=%3 pre=%4 post=%5 bytes=%6 file=%7")
+                    .arg(capture.frameId)
+                    .arg(capture.samples.size())
+                    .arg(capture.sampleRate)
+                    .arg(capture.preRollSamples)
+                    .arg(capture.postRollSamples)
+                    .arg(written)
+                    .arg(partPath);
+            return;
+        }
+
+        if (QFile::exists(finalPath))
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_RENAME_FAIL frame=%1 reason=destination_exists part=%2 final=%3")
+                    .arg(capture.frameId)
+                    .arg(partPath)
+                    .arg(finalPath);
+            return;
+        }
+
+        if (!QFile::rename(partPath, finalPath))
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_RENAME_FAIL frame=%1 part=%2 final=%3")
+                    .arg(capture.frameId)
+                    .arg(partPath)
+                    .arg(finalPath);
+            return;
+        }
 
         qInfo().noquote()
             << QStringLiteral("MESHTASTIC_IQ_CAPTURE frame=%1 samples=%2 sample_rate=%3 pre=%4 post=%5 bytes=%6 file=%7")
@@ -1452,7 +1541,7 @@ void MeshtasticDemodSink::writeTempIqCapture(TempIqCapture capture)
                 .arg(capture.preRollSamples)
                 .arg(capture.postRollSamples)
                 .arg(written)
-                .arg(capture.filePath);
+                .arg(finalPath);
     }).detach();
 }
 

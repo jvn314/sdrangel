@@ -124,7 +124,9 @@ private:
         unsigned int postRollSamples = 0U;
         unsigned int postRemaining = 0U;
         unsigned int sampleRate = 0U;
+        size_t maxSamples = 0U;
         bool frameFinalized = false;
+        bool truncated = false;
     };
 
     static constexpr unsigned int m_tempIqPreRollSymbols = 32U;
