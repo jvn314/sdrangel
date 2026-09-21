@@ -146,6 +146,7 @@ private:
     int m_tempIqChannelFrequencyOffset;
     int m_tempIqBandwidth;
     unsigned int m_tempIqNbSymbols;
+    bool m_tempIqCaptureEnabled;
     unsigned int m_tempIqSampleRate; //!< Channel-rate IQ capture sample rate (pre-interpolator)
     size_t m_tempIqChannelSamplesPerSymbol;
     size_t m_tempIqPreRollLimit;
@@ -234,7 +235,7 @@ private:
     void buildLoRaPayloadDownchirp();
     void finalizeLoRaFrame();
     void updateTempIqCapture(const Complex& ci);
-    TempIqCapture& startTempIqCapture(uint32_t frameId);
+    TempIqCapture *startTempIqCapture(uint32_t frameId);
     void finalizeTempIqCapture(uint32_t frameId);
     void writeTempIqCapture(TempIqCapture capture);
     void updateTempIqCaptureGeometry();

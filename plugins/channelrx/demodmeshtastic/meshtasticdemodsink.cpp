@@ -62,6 +62,7 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
     m_tempIqChannelFrequencyOffset(0),
     m_tempIqBandwidth(0),
     m_tempIqNbSymbols(0U),
+    m_tempIqCaptureEnabled(false),
     m_tempIqSampleRate(0U),
     m_tempIqChannelSamplesPerSymbol(1U),
     m_tempIqPreRollLimit(1U),
@@ -1155,13 +1156,16 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             m_loRaFrameId++;
             m_decodeMsg = MeshtasticDemodMsg::MsgDecodeSymbols::create();
             m_decodeMsg->setFrameId(m_loRaFrameId);
-            TempIqCapture& tempIqCapture = startTempIqCapture(m_loRaFrameId);
-            m_decodeMsg->setTempIqCapture(
-                tempIqCapture.filePath,
-                tempIqCapture.sampleRate,
-                tempIqCapture.preRollSamples,
-                tempIqCapture.postRollSamples
-            );
+            TempIqCapture *tempIqCapture = startTempIqCapture(m_loRaFrameId);
+            if (tempIqCapture)
+            {
+                m_decodeMsg->setTempIqCapture(
+                    tempIqCapture->filePath,
+                    tempIqCapture->sampleRate,
+                    tempIqCapture->preRollSamples,
+                    tempIqCapture->postRollSamples
+                );
+            }
             // Freeze the RF and pipeline configuration that produced this frame.
             // Later channel or pipeline reconfiguration must not change the
             // provenance reported for this already-created frame.
@@ -1282,33 +1286,81 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
 
 void MeshtasticDemodSink::updateTempIqCaptureGeometry()
 {
+    constexpr size_t captureCeilingBytes =
+        static_cast<size_t>(256U) * static_cast<size_t>(1024U) * static_cast<size_t>(1024U);
+    constexpr size_t bytesPerIqSample = static_cast<size_t>(2U) * sizeof(float);
+    constexpr size_t captureCeilingSamples = captureCeilingBytes / bytesPerIqSample;
+
     const qint64 deviceCenterFrequency = m_deviceCenterFrequency;
     const int inputFrequencyOffset = m_settings.m_inputFrequencyOffset;
     const int channelFrequencyOffset = m_channelFrequencyOffset;
     const unsigned int channelRate = static_cast<unsigned int>(std::max(1, m_channelSampleRate));
     const unsigned int bandwidth = static_cast<unsigned int>(std::max(1, m_bandwidth));
     const unsigned int nbSymbols = std::max(1U, m_nbSymbols);
-    const size_t channelSamplesPerSymbol = static_cast<size_t>(std::max(
-        1.0,
-        std::round(
-            static_cast<double>(channelRate)
-            * static_cast<double>(nbSymbols)
-            / static_cast<double>(bandwidth)
-        )
-    ));
-    const size_t preRollLimit =
-        static_cast<size_t>(m_tempIqPreRollSymbols) * channelSamplesPerSymbol;
-    size_t maxCaptureSamples =
-        preRollLimit
-        + static_cast<size_t>(
-            m_settings.m_nbSymbolsMax
-            + m_tempIqPostRollSymbols
-            + m_tempIqCaptureMarginSymbols)
-            * channelSamplesPerSymbol;
 
-    if (maxCaptureSamples < preRollLimit) {
-        maxCaptureSamples = preRollLimit;
+    bool enabled = false;
+    size_t channelSamplesPerSymbol = 0U;
+    size_t preRollLimit = 0U;
+    size_t maxCaptureSamples = 0U;
+    size_t symbolTerm = 0U;
+
+    const double channelSamplesPerSymbolDouble = std::round(
+        static_cast<double>(channelRate)
+        * static_cast<double>(nbSymbols)
+        / static_cast<double>(bandwidth)
+    );
+    const bool samplesPerSymbolFits =
+        std::isfinite(channelSamplesPerSymbolDouble)
+        && (channelSamplesPerSymbolDouble >= 1.0)
+        && (channelSamplesPerSymbolDouble <= static_cast<double>(captureCeilingSamples));
+
+    if (samplesPerSymbolFits) {
+        channelSamplesPerSymbol = static_cast<size_t>(channelSamplesPerSymbolDouble);
     }
+
+    const size_t extraSymbols =
+        static_cast<size_t>(m_tempIqPostRollSymbols)
+        + static_cast<size_t>(m_tempIqCaptureMarginSymbols);
+    const size_t nbSymbolsMax = static_cast<size_t>(m_settings.m_nbSymbolsMax);
+    const bool symbolTermFits =
+        nbSymbolsMax <= (std::numeric_limits<size_t>::max() - extraSymbols);
+
+    if (symbolTermFits) {
+        symbolTerm = nbSymbolsMax + extraSymbols;
+    }
+
+    const bool preRollFits =
+        (channelSamplesPerSymbol != 0U)
+        && (static_cast<size_t>(m_tempIqPreRollSymbols)
+            <= (captureCeilingSamples / channelSamplesPerSymbol));
+
+    if (preRollFits) {
+        preRollLimit =
+            static_cast<size_t>(m_tempIqPreRollSymbols) * channelSamplesPerSymbol;
+    }
+
+    if (samplesPerSymbolFits
+        && symbolTermFits
+        && preRollFits
+        && (symbolTerm
+            <= ((captureCeilingSamples - preRollLimit) / channelSamplesPerSymbol)))
+    {
+        enabled = true;
+        maxCaptureSamples =
+            preRollLimit + symbolTerm * channelSamplesPerSymbol;
+    }
+
+    // Diagnostic only. Keep this in floating point so an oversized request can
+    // still be reported even when its true byte count is not representable by size_t.
+    const double requestedBytes =
+        (
+            static_cast<double>(m_tempIqPreRollSymbols)
+            + static_cast<double>(m_settings.m_nbSymbolsMax)
+            + static_cast<double>(m_tempIqPostRollSymbols)
+            + static_cast<double>(m_tempIqCaptureMarginSymbols)
+        )
+        * channelSamplesPerSymbolDouble
+        * static_cast<double>(bytesPerIqSample);
 
     const bool captureConfigurationChanged =
         (deviceCenterFrequency != m_tempIqDeviceCenterFrequency)
@@ -1319,7 +1371,8 @@ void MeshtasticDemodSink::updateTempIqCaptureGeometry()
         || (nbSymbols != m_tempIqNbSymbols)
         || (channelSamplesPerSymbol != m_tempIqChannelSamplesPerSymbol)
         || (preRollLimit != m_tempIqPreRollLimit)
-        || (maxCaptureSamples != m_tempIqMaxCaptureSamples);
+        || (maxCaptureSamples != m_tempIqMaxCaptureSamples)
+        || (enabled != m_tempIqCaptureEnabled);
 
     if (!captureConfigurationChanged) {
         return;
@@ -1349,7 +1402,9 @@ void MeshtasticDemodSink::updateTempIqCaptureGeometry()
             "old_nb_symbols=%12 new_nb_symbols=%13 "
             "old_samples_per_symbol=%14 new_samples_per_symbol=%15 "
             "old_pre_roll_max=%16 new_pre_roll_max=%17 "
-            "old_max=%18 new_max=%19")
+            "old_max=%18 new_max=%19 "
+            "old_enabled=%20 new_enabled=%21 "
+            "requested_bytes=%22 ceiling_bytes=%23")
             .arg(m_loRaFrameId)
             .arg(m_tempIqDeviceCenterFrequency)
             .arg(deviceCenterFrequency)
@@ -1368,13 +1423,18 @@ void MeshtasticDemodSink::updateTempIqCaptureGeometry()
             .arg(m_tempIqPreRollLimit)
             .arg(preRollLimit)
             .arg(m_tempIqMaxCaptureSamples)
-            .arg(maxCaptureSamples);
+            .arg(maxCaptureSamples)
+            .arg(m_tempIqCaptureEnabled ? 1 : 0)
+            .arg(enabled ? 1 : 0)
+            .arg(requestedBytes, 0, 'g', 17)
+            .arg(captureCeilingBytes);
 
     m_tempIqDeviceCenterFrequency = deviceCenterFrequency;
     m_tempIqInputFrequencyOffset = inputFrequencyOffset;
     m_tempIqChannelFrequencyOffset = channelFrequencyOffset;
     m_tempIqBandwidth = static_cast<int>(bandwidth);
     m_tempIqNbSymbols = nbSymbols;
+    m_tempIqCaptureEnabled = enabled;
     m_tempIqSampleRate = channelRate;
     m_tempIqChannelSamplesPerSymbol = channelSamplesPerSymbol;
     m_tempIqPreRollLimit = preRollLimit;
@@ -1383,6 +1443,10 @@ void MeshtasticDemodSink::updateTempIqCaptureGeometry()
 
 void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
 {
+    if (!m_tempIqCaptureEnabled) {
+        return;
+    }
+
     m_tempIqPreRoll.push_back(ci);
 
     while (m_tempIqPreRoll.size() > m_tempIqPreRollLimit) {
@@ -1401,7 +1465,6 @@ void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
         // The bound is frozen when the capture starts so later geometry changes
         // cannot silently change this capture's LIMIT semantics.
         if (!capture.frameFinalized
-            && (capture.maxSamples > 0U)
             && (capture.samples.size() >= capture.maxSamples))
         {
             qWarning().noquote()
@@ -1428,8 +1491,12 @@ void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
     }
 }
 
-MeshtasticDemodSink::TempIqCapture& MeshtasticDemodSink::startTempIqCapture(uint32_t frameId)
+MeshtasticDemodSink::TempIqCapture *MeshtasticDemodSink::startTempIqCapture(uint32_t frameId)
 {
+    if (!m_tempIqCaptureEnabled || (m_tempIqMaxCaptureSamples == 0U)) {
+        return nullptr;
+    }
+
     TempIqCapture capture;
     capture.frameId = frameId;
     capture.preRollSamples = static_cast<unsigned int>(m_tempIqPreRoll.size());
@@ -1457,7 +1524,7 @@ MeshtasticDemodSink::TempIqCapture& MeshtasticDemodSink::startTempIqCapture(uint
         .arg(uniqueSuffix);
 
     m_tempIqCaptures.push_back(std::move(capture));
-    return m_tempIqCaptures.back();
+    return &m_tempIqCaptures.back();
 }
 
 void MeshtasticDemodSink::finalizeTempIqCapture(uint32_t frameId)
