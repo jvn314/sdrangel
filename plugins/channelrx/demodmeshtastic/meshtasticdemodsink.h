@@ -129,9 +129,13 @@ private:
 
     static constexpr unsigned int m_tempIqPreRollSymbols = 32U;
     static constexpr unsigned int m_tempIqPostRollSymbols = 4U;
+    static constexpr unsigned int m_tempIqCaptureMarginSymbols = 16U;
     std::deque<Complex> m_tempIqPreRoll;
     std::vector<TempIqCapture> m_tempIqCaptures;
     unsigned int m_tempIqSampleRate; //!< Channel-rate IQ capture sample rate (pre-interpolator)
+    size_t m_tempIqChannelSamplesPerSymbol;
+    size_t m_tempIqPreRollLimit;
+    size_t m_tempIqMaxCaptureSamples;
 
     unsigned int m_osFactor;       //!< Oversampling factor at frame-sync input (gr-lora_sdr os_factor)
     unsigned int m_osCenterPhase;  //!< Selected downsample phase inside oversampled symbol
@@ -219,6 +223,7 @@ private:
     TempIqCapture& startTempIqCapture(uint32_t frameId);
     void finalizeTempIqCapture(uint32_t frameId);
     void writeTempIqCapture(TempIqCapture capture);
+    void updateTempIqCaptureGeometry();
 };
 
 #endif // INCLUDE_MESHTASTICDEMODSINK_H

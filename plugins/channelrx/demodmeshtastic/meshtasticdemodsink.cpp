@@ -56,6 +56,9 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
     m_headerFeedbackWaitSteps(0U),
     m_loRaFrameId(0U),
     m_tempIqSampleRate(0U),
+    m_tempIqChannelSamplesPerSymbol(1U),
+    m_tempIqPreRollLimit(1U),
+    m_tempIqMaxCaptureSamples(1U),
     m_osFactor(MeshtasticDemodSettings::oversampling > 0 ? MeshtasticDemodSettings::oversampling : 1),
     m_osCenterPhase((MeshtasticDemodSettings::oversampling > 1 ? MeshtasticDemodSettings::oversampling / 2 : 0)),
     m_osCounter(0),
@@ -190,6 +193,7 @@ void MeshtasticDemodSink::initSF(unsigned int sf, unsigned int deBits)
     m_loRaCFOSTOEstimated = false;
     m_loRaReceivedHeader = false;
     m_loRaFrameSymbolCount = 0;
+    updateTempIqCaptureGeometry();
 
     // Canonical gr-lora_sdr reference chirps (utilities::build_ref_chirps, id=0, os_factor=1).
     for (unsigned int i = 0; i < m_fftLength; i++)
@@ -1269,22 +1273,40 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
     return std::max(1, itemsToConsume);
 }
 
-void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
+void MeshtasticDemodSink::updateTempIqCaptureGeometry()
 {
     const unsigned int channelRate = static_cast<unsigned int>(std::max(1, m_channelSampleRate));
     const unsigned int bandwidth = static_cast<unsigned int>(std::max(1, m_bandwidth));
-    const size_t channelSamplesPerSymbol = static_cast<size_t>(std::max(
+
+    m_tempIqSampleRate = channelRate;
+    m_tempIqChannelSamplesPerSymbol = static_cast<size_t>(std::max(
         1.0,
         std::round(
             static_cast<double>(channelRate)
-            * static_cast<double>(m_nbSymbols)
+            * static_cast<double>(std::max(1U, m_nbSymbols))
             / static_cast<double>(bandwidth)
         )
     ));
-    const size_t preRollLimit = static_cast<size_t>(m_tempIqPreRollSymbols) * channelSamplesPerSymbol;
+    m_tempIqPreRollLimit =
+        static_cast<size_t>(m_tempIqPreRollSymbols) * m_tempIqChannelSamplesPerSymbol;
+    m_tempIqMaxCaptureSamples =
+        m_tempIqPreRollLimit
+        + static_cast<size_t>(
+            m_settings.m_nbSymbolsMax
+            + m_tempIqPostRollSymbols
+            + m_tempIqCaptureMarginSymbols)
+            * m_tempIqChannelSamplesPerSymbol;
+
+    if (m_tempIqMaxCaptureSamples < m_tempIqPreRollLimit) {
+        m_tempIqMaxCaptureSamples = m_tempIqPreRollLimit;
+    }
+}
+
+void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
+{
     m_tempIqPreRoll.push_back(ci);
 
-    while ((preRollLimit > 0U) && (m_tempIqPreRoll.size() > preRollLimit)) {
+    while (m_tempIqPreRoll.size() > m_tempIqPreRollLimit) {
         m_tempIqPreRoll.pop_front();
     }
 
@@ -1294,6 +1316,19 @@ void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
 
         if (capture.frameFinalized && (capture.postRemaining > 0U)) {
             --capture.postRemaining;
+        }
+
+        // Safety cap for any frame-abandon path not handled elsewhere.
+        if (!capture.frameFinalized
+            && (capture.samples.size() >= m_tempIqMaxCaptureSamples))
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_LIMIT frame=%1 samples=%2 max=%3")
+                    .arg(capture.frameId)
+                    .arg(capture.samples.size())
+                    .arg(m_tempIqMaxCaptureSamples);
+            capture.frameFinalized = true;
+            capture.postRemaining = 0U;
         }
     }
 
@@ -1314,27 +1349,12 @@ MeshtasticDemodSink::TempIqCapture& MeshtasticDemodSink::startTempIqCapture(uint
 {
     TempIqCapture capture;
     capture.frameId = frameId;
-    const unsigned int channelRate = static_cast<unsigned int>(std::max(1, m_channelSampleRate));
-    const unsigned int bandwidth = static_cast<unsigned int>(std::max(1, m_bandwidth));
-    const size_t channelSamplesPerSymbol = static_cast<size_t>(std::max(
-        1.0,
-        std::round(
-            static_cast<double>(channelRate)
-            * static_cast<double>(m_nbSymbols)
-            / static_cast<double>(bandwidth)
-        )
-    ));
-
     capture.preRollSamples = static_cast<unsigned int>(m_tempIqPreRoll.size());
     capture.postRollSamples = static_cast<unsigned int>(
-        static_cast<size_t>(m_tempIqPostRollSymbols) * channelSamplesPerSymbol);
+        static_cast<size_t>(m_tempIqPostRollSymbols) * m_tempIqChannelSamplesPerSymbol);
     capture.postRemaining = capture.postRollSamples;
-    capture.sampleRate = channelRate;
-    capture.samples.reserve(
-        capture.preRollSamples
-        + static_cast<size_t>(m_settings.m_nbSymbolsMax + m_tempIqPostRollSymbols + 8U)
-            * channelSamplesPerSymbol
-    );
+    capture.sampleRate = m_tempIqSampleRate;
+    capture.samples.reserve(m_tempIqMaxCaptureSamples);
     capture.samples.insert(
         capture.samples.end(),
         m_tempIqPreRoll.begin(),
@@ -1458,7 +1478,6 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
         // Preserve the original float cutoff expression exactly; old/new
         // cutoff values above are diagnostics only.
         m_interpolator.create(16, channelSampleRate, bandwidth / 1.9f);
-        m_tempIqSampleRate = static_cast<unsigned int>(std::max(1, channelSampleRate));
         m_interpolatorDistance = (Real) channelSampleRate / (Real) targetFrameSyncRate;
         m_sampleDistanceRemain = 0;
         m_osCounter = 0;
@@ -1471,6 +1490,7 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
     m_channelSampleRate = channelSampleRate;
     m_bandwidth = bandwidth;
     m_channelFrequencyOffset = channelFrequencyOffset;
+    updateTempIqCaptureGeometry();
 }
 
 void MeshtasticDemodSink::applySettings(const MeshtasticDemodSettings& settings, bool force)
@@ -1511,6 +1531,7 @@ void MeshtasticDemodSink::applySettings(const MeshtasticDemodSettings& settings,
             << " fftInterpolation: " << m_fftInterpolation;
 
     m_settings = settings;
+    updateTempIqCaptureGeometry();
     m_loRaRequiredUpchirps = m_requiredPreambleChirps;
     m_loRaUpSymbToUse = (m_loRaRequiredUpchirps > 0U) ? static_cast<int>(m_loRaRequiredUpchirps - 1U) : 0;
     m_loRaPreambleVals.assign(m_loRaRequiredUpchirps, 0);
