@@ -1275,6 +1275,7 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
 
 void MeshtasticDemodSink::updateTempIqCaptureGeometry()
 {
+    const size_t previousMaxCaptureSamples = m_tempIqMaxCaptureSamples;
     const unsigned int channelRate = static_cast<unsigned int>(std::max(1, m_channelSampleRate));
     const unsigned int bandwidth = static_cast<unsigned int>(std::max(1, m_bandwidth));
 
@@ -1299,6 +1300,18 @@ void MeshtasticDemodSink::updateTempIqCaptureGeometry()
 
     if (m_tempIqMaxCaptureSamples < m_tempIqPreRollLimit) {
         m_tempIqMaxCaptureSamples = m_tempIqPreRollLimit;
+    }
+
+    if (m_tempIqMaxCaptureSamples != previousMaxCaptureSamples)
+    {
+        qDebug().noquote()
+            << QStringLiteral("MESHTASTIC_IQ_GEOMETRY frame=%1 old_max=%2 new_max=%3 sample_rate=%4 samples_per_symbol=%5 pre_roll_max=%6")
+                .arg(m_loRaFrameId)
+                .arg(previousMaxCaptureSamples)
+                .arg(m_tempIqMaxCaptureSamples)
+                .arg(m_tempIqSampleRate)
+                .arg(m_tempIqChannelSamplesPerSymbol)
+                .arg(m_tempIqPreRollLimit);
     }
 }
 
