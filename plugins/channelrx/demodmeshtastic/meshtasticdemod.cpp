@@ -678,6 +678,57 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     lora["nb_codewords"]  = static_cast<int>(msg.getNbCodewords());
     lora["payload_hex"]   = QString(msg.getBytes().left(
         static_cast<int>(msg.getPacketSize())).toHex());
+
+    // Temporary three-way comparison of identical finalized decoder input.
+    // This is diagnostic-only and does not participate in production acceptance.
+    const MeshtasticDemodMsg::TempDecodeComparison& tempCompare = msg.getTempDecodeComparison();
+
+    if (tempCompare.valid)
+    {
+        auto pathToJson = [](const MeshtasticDemodMsg::TempDecodePathResult& pathResult) {
+            QJsonObject path;
+            path["source_ref"] = pathResult.sourceRef;
+            path["candidate_id"] = pathResult.candidateId;
+            path["header_source"] = pathResult.headerSource;
+            path["binfix"] = pathResult.binFix;
+            path["has_crc"] = pathResult.hasCRC;
+            path["header_crc"] = pathResult.headerCRCStatus
+                ? QStringLiteral("ok") : QStringLiteral("err");
+
+            if (pathResult.earlyEOM) {
+                path["payload_crc"] = QStringLiteral("n/a");
+            } else {
+                path["payload_crc"] = pathResult.payloadCRCStatus
+                    ? QStringLiteral("ok") : QStringLiteral("err");
+            }
+
+            path["packet_length"] = static_cast<int>(pathResult.packetLength);
+            path["nb_symbols"] = static_cast<int>(pathResult.nbSymbols);
+            path["nb_codewords"] = static_cast<int>(pathResult.nbCodewords);
+            path["payload_hex"] = QString(pathResult.bytes.left(
+                static_cast<int>(pathResult.packetLength)).toHex());
+            return path;
+        };
+
+        QJsonObject tempDecodeCompare;
+        tempDecodeCompare["pre_binfix"] = pathToJson(tempCompare.preBinfix);
+        tempDecodeCompare["fft_binfix"] = pathToJson(tempCompare.fftBinfix);
+        tempDecodeCompare["current"] = pathToJson(tempCompare.current);
+
+        QJsonObject agreement;
+        agreement["pre_fft_same_payload"] =
+            tempCompare.preBinfix.bytes == tempCompare.fftBinfix.bytes;
+        agreement["fft_current_same_payload"] =
+            tempCompare.fftBinfix.bytes == tempCompare.current.bytes;
+        agreement["pre_fft_same_payload_crc"] =
+            tempCompare.preBinfix.payloadCRCStatus == tempCompare.fftBinfix.payloadCRCStatus;
+        agreement["fft_current_same_payload_crc"] =
+            tempCompare.fftBinfix.payloadCRCStatus == tempCompare.current.payloadCRCStatus;
+        tempDecodeCompare["agreement"] = agreement;
+
+        lora["temp_decode_compare"] = tempDecodeCompare;
+    }
+
     root["lora"] = lora;
 
     // Meshtastic section — only for sync word 0x2B
