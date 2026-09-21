@@ -726,6 +726,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         tempDecodeCompare["current"] = pathToJson(tempCompare.current);
 
         QJsonObject agreement;
+        agreement["fft_current_transcription_match"] =
+            tempCompare.fftCurrentTranscriptionMatch;
         agreement["pre_fft_same_payload"] =
             tempCompare.preBinfix.bytes == tempCompare.fftBinfix.bytes;
         agreement["fft_current_same_payload"] =

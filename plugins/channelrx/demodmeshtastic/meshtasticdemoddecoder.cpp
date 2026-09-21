@@ -677,6 +677,29 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             binFix,
             productionState);
 
+        // This check validates only that the fft-bin-fix retry policy was
+        // transcribed faithfully into the shadow path. Both paths still share
+        // the current decodeSymbols/decodeBytesSoft implementation and the same
+        // finalized demodulator input, so agreement says nothing about base
+        // demodulation or historical decoder implementation outside retry policy.
+        const MeshtasticDemodMsg::TempDecodePathResult& fftResult = tempComparison.fftBinfix;
+        const MeshtasticDemodMsg::TempDecodePathResult& currentResult = tempComparison.current;
+        tempComparison.fftCurrentTranscriptionMatch =
+            (fftResult.bytes == currentResult.bytes)
+            && (fftResult.hasCRC == currentResult.hasCRC)
+            && (fftResult.nbParityBits == currentResult.nbParityBits)
+            && (fftResult.packetLength == currentResult.packetLength)
+            && (fftResult.nbSymbols == currentResult.nbSymbols)
+            && (fftResult.nbCodewords == currentResult.nbCodewords)
+            && (fftResult.earlyEOM == currentResult.earlyEOM)
+            && (fftResult.headerParityStatus == currentResult.headerParityStatus)
+            && (fftResult.headerCRCStatus == currentResult.headerCRCStatus)
+            && (fftResult.payloadParityStatus == currentResult.payloadParityStatus)
+            && (fftResult.payloadCRCStatus == currentResult.payloadCRCStatus)
+            && (fftResult.binFix == currentResult.binFix)
+            && (fftResult.candidateId == currentResult.candidateId)
+            && (fftResult.headerSource == currentResult.headerSource);
+
         // Shadow decodes must never change production behavior or state.
         restoreLoRaState(productionState);
 
