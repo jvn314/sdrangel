@@ -49,7 +49,14 @@ public:
     bool getDemodActive() const { return m_demodActive; }
     void setDecoderMessageQueue(MessageQueue *messageQueue) { m_decoderMsgQueue = messageQueue; }
 	void setSpectrumSink(BasebandSampleSink* spectrumSink) { m_spectrumSink = spectrumSink; }
-    void setDeviceCenterFrequency(qint64 centerFrequency) { m_deviceCenterFrequency = centerFrequency; }
+    void setDeviceCenterFrequency(qint64 centerFrequency)
+    {
+        if (centerFrequency != m_deviceCenterFrequency)
+        {
+            m_deviceCenterFrequency = centerFrequency;
+            updateTempIqCaptureGeometry();
+        }
+    }
     void applyLoRaHeaderFeedback(
         uint32_t frameId,
         bool valid,
@@ -134,6 +141,11 @@ private:
     static constexpr unsigned int m_tempIqCaptureMarginSymbols = 16U;
     std::deque<Complex> m_tempIqPreRoll;
     std::vector<TempIqCapture> m_tempIqCaptures;
+    qint64 m_tempIqDeviceCenterFrequency;
+    int m_tempIqInputFrequencyOffset;
+    int m_tempIqChannelFrequencyOffset;
+    int m_tempIqBandwidth;
+    unsigned int m_tempIqNbSymbols;
     unsigned int m_tempIqSampleRate; //!< Channel-rate IQ capture sample rate (pre-interpolator)
     size_t m_tempIqChannelSamplesPerSymbol;
     size_t m_tempIqPreRollLimit;

@@ -57,6 +57,11 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
     m_waitHeaderFeedback(false),
     m_headerFeedbackWaitSteps(0U),
     m_loRaFrameId(0U),
+    m_tempIqDeviceCenterFrequency(0),
+    m_tempIqInputFrequencyOffset(0),
+    m_tempIqChannelFrequencyOffset(0),
+    m_tempIqBandwidth(0),
+    m_tempIqNbSymbols(0U),
     m_tempIqSampleRate(0U),
     m_tempIqChannelSamplesPerSymbol(1U),
     m_tempIqPreRollLimit(1U),
@@ -95,7 +100,7 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
 	m_nco.setFreq(m_channelFrequencyOffset, m_channelSampleRate);
     {
         const double loggedCutoffHz = static_cast<double>(m_bandwidth) / 1.9;
-        qDebug().noquote()
+        qInfo().noquote()
             << QStringLiteral("MESHTASTIC_INTERP_CREATE ts=%1 frame=%2 reason=ctor channel_sr=%3 requested_bw=%4 previous_bw=%5 force=1 old_cutoff_hz=%6 new_cutoff_hz=%7")
                 .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs))
                 .arg(m_loRaFrameId)
@@ -1277,44 +1282,103 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
 
 void MeshtasticDemodSink::updateTempIqCaptureGeometry()
 {
-    const size_t previousMaxCaptureSamples = m_tempIqMaxCaptureSamples;
+    const qint64 deviceCenterFrequency = m_deviceCenterFrequency;
+    const int inputFrequencyOffset = m_settings.m_inputFrequencyOffset;
+    const int channelFrequencyOffset = m_channelFrequencyOffset;
     const unsigned int channelRate = static_cast<unsigned int>(std::max(1, m_channelSampleRate));
     const unsigned int bandwidth = static_cast<unsigned int>(std::max(1, m_bandwidth));
-
-    m_tempIqSampleRate = channelRate;
-    m_tempIqChannelSamplesPerSymbol = static_cast<size_t>(std::max(
+    const unsigned int nbSymbols = std::max(1U, m_nbSymbols);
+    const size_t channelSamplesPerSymbol = static_cast<size_t>(std::max(
         1.0,
         std::round(
             static_cast<double>(channelRate)
-            * static_cast<double>(std::max(1U, m_nbSymbols))
+            * static_cast<double>(nbSymbols)
             / static_cast<double>(bandwidth)
         )
     ));
-    m_tempIqPreRollLimit =
-        static_cast<size_t>(m_tempIqPreRollSymbols) * m_tempIqChannelSamplesPerSymbol;
-    m_tempIqMaxCaptureSamples =
-        m_tempIqPreRollLimit
+    const size_t preRollLimit =
+        static_cast<size_t>(m_tempIqPreRollSymbols) * channelSamplesPerSymbol;
+    size_t maxCaptureSamples =
+        preRollLimit
         + static_cast<size_t>(
             m_settings.m_nbSymbolsMax
             + m_tempIqPostRollSymbols
             + m_tempIqCaptureMarginSymbols)
-            * m_tempIqChannelSamplesPerSymbol;
+            * channelSamplesPerSymbol;
 
-    if (m_tempIqMaxCaptureSamples < m_tempIqPreRollLimit) {
-        m_tempIqMaxCaptureSamples = m_tempIqPreRollLimit;
+    if (maxCaptureSamples < preRollLimit) {
+        maxCaptureSamples = preRollLimit;
     }
 
-    if (m_tempIqMaxCaptureSamples != previousMaxCaptureSamples)
+    const bool captureConfigurationChanged =
+        (deviceCenterFrequency != m_tempIqDeviceCenterFrequency)
+        || (inputFrequencyOffset != m_tempIqInputFrequencyOffset)
+        || (channelFrequencyOffset != m_tempIqChannelFrequencyOffset)
+        || (channelRate != m_tempIqSampleRate)
+        || (bandwidth != static_cast<unsigned int>(std::max(0, m_tempIqBandwidth)))
+        || (nbSymbols != m_tempIqNbSymbols)
+        || (channelSamplesPerSymbol != m_tempIqChannelSamplesPerSymbol)
+        || (preRollLimit != m_tempIqPreRollLimit)
+        || (maxCaptureSamples != m_tempIqMaxCaptureSamples);
+
+    if (!captureConfigurationChanged) {
+        return;
+    }
+
+    // A capture must contain samples from exactly one configuration. Abort any
+    // active capture before installing the new signature, and discard pre-roll
+    // collected under the previous signature.
+    for (TempIqCapture& capture : m_tempIqCaptures)
     {
-        qDebug().noquote()
-            << QStringLiteral("MESHTASTIC_IQ_GEOMETRY frame=%1 old_max=%2 new_max=%3 sample_rate=%4 samples_per_symbol=%5 pre_roll_max=%6")
-                .arg(m_loRaFrameId)
-                .arg(previousMaxCaptureSamples)
-                .arg(m_tempIqMaxCaptureSamples)
-                .arg(m_tempIqSampleRate)
-                .arg(m_tempIqChannelSamplesPerSymbol)
-                .arg(m_tempIqPreRollLimit);
+        capture.truncated = true;
+        capture.frameFinalized = true;
+        capture.postRemaining = 0U;
+        writeTempIqCapture(std::move(capture));
     }
+    m_tempIqCaptures.clear();
+    m_tempIqPreRoll.clear();
+
+    qInfo().noquote()
+        << QStringLiteral(
+            "MESHTASTIC_IQ_GEOMETRY frame=%1 "
+            "old_center=%2 new_center=%3 "
+            "old_requested_offset=%4 new_requested_offset=%5 "
+            "old_residual_offset=%6 new_residual_offset=%7 "
+            "old_sample_rate=%8 new_sample_rate=%9 "
+            "old_bandwidth=%10 new_bandwidth=%11 "
+            "old_nb_symbols=%12 new_nb_symbols=%13 "
+            "old_samples_per_symbol=%14 new_samples_per_symbol=%15 "
+            "old_pre_roll_max=%16 new_pre_roll_max=%17 "
+            "old_max=%18 new_max=%19")
+            .arg(m_loRaFrameId)
+            .arg(m_tempIqDeviceCenterFrequency)
+            .arg(deviceCenterFrequency)
+            .arg(m_tempIqInputFrequencyOffset)
+            .arg(inputFrequencyOffset)
+            .arg(m_tempIqChannelFrequencyOffset)
+            .arg(channelFrequencyOffset)
+            .arg(m_tempIqSampleRate)
+            .arg(channelRate)
+            .arg(m_tempIqBandwidth)
+            .arg(bandwidth)
+            .arg(m_tempIqNbSymbols)
+            .arg(nbSymbols)
+            .arg(m_tempIqChannelSamplesPerSymbol)
+            .arg(channelSamplesPerSymbol)
+            .arg(m_tempIqPreRollLimit)
+            .arg(preRollLimit)
+            .arg(m_tempIqMaxCaptureSamples)
+            .arg(maxCaptureSamples);
+
+    m_tempIqDeviceCenterFrequency = deviceCenterFrequency;
+    m_tempIqInputFrequencyOffset = inputFrequencyOffset;
+    m_tempIqChannelFrequencyOffset = channelFrequencyOffset;
+    m_tempIqBandwidth = static_cast<int>(bandwidth);
+    m_tempIqNbSymbols = nbSymbols;
+    m_tempIqSampleRate = channelRate;
+    m_tempIqChannelSamplesPerSymbol = channelSamplesPerSymbol;
+    m_tempIqPreRollLimit = preRollLimit;
+    m_tempIqMaxCaptureSamples = maxCaptureSamples;
 }
 
 void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
@@ -1567,7 +1631,7 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
         const int previousBandwidth = m_bandwidth;
         const double oldCutoffHz = static_cast<double>(previousBandwidth) / 1.9;
         const double newCutoffHz = static_cast<double>(bandwidth) / 1.9;
-        qDebug().noquote()
+        qInfo().noquote()
             << QStringLiteral("MESHTASTIC_INTERP_CREATE ts=%1 frame=%2 reason=apply channel_sr=%3 requested_bw=%4 previous_bw=%5 force=%6 old_cutoff_hz=%7 new_cutoff_hz=%8")
                 .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs))
                 .arg(m_loRaFrameId)
