@@ -29,6 +29,36 @@
 
 namespace MeshtasticDemodMsg
 {
+    // Temporary three-way decoder comparison. These fields are diagnostic only
+    // and compare identical finalized decoder input against historical recovery
+    // policies without changing the production decode decision.
+    struct TempDecodePathResult
+    {
+        QString sourceRef;
+        QString candidateId;
+        QString headerSource;
+        QString binFix;
+        QByteArray bytes;
+        bool hasCRC = false;
+        unsigned int nbParityBits = 0U;
+        unsigned int packetLength = 0U;
+        unsigned int nbSymbols = 0U;
+        unsigned int nbCodewords = 0U;
+        bool earlyEOM = false;
+        int headerParityStatus = (int) MeshtasticDemodSettings::ParityUndefined;
+        bool headerCRCStatus = false;
+        int payloadParityStatus = (int) MeshtasticDemodSettings::ParityUndefined;
+        bool payloadCRCStatus = false;
+    };
+
+    struct TempDecodeComparison
+    {
+        bool valid = false;
+        TempDecodePathResult preBinfix;
+        TempDecodePathResult fftBinfix;
+        TempDecodePathResult current;
+    };
+
     class MsgDecodeSymbols : public Message {
         MESSAGE_CLASS_DECLARATION
 
@@ -334,6 +364,7 @@ namespace MeshtasticDemodMsg
         int getTempInputFrequencyOffsetHz() const { return m_tempInputFrequencyOffsetHz; }
         int getTempChannelFrequencyOffsetHz() const { return m_tempChannelFrequencyOffsetHz; }
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
+        const TempDecodeComparison& getTempDecodeComparison() const { return m_tempDecodeComparison; }
 
         static MsgReportDecodeBytes* create(const QByteArray& bytes) {
             return new MsgReportDecodeBytes(bytes);
@@ -404,6 +435,9 @@ namespace MeshtasticDemodMsg
         void setDechirpedSpectrum(const std::vector<std::vector<float>>& dechirpedSpectrum) {
             m_dechirpedSpectrum = dechirpedSpectrum;
         }
+        void setTempDecodeComparison(const TempDecodeComparison& comparison) {
+            m_tempDecodeComparison = comparison;
+        }
 
     private:
         QByteArray m_bytes;
@@ -436,6 +470,7 @@ namespace MeshtasticDemodMsg
         int m_tempInputFrequencyOffsetHz;
         int m_tempChannelFrequencyOffsetHz;
         std::vector<std::vector<float>> m_dechirpedSpectrum;
+        TempDecodeComparison m_tempDecodeComparison;
 
         MsgReportDecodeBytes(const QByteArray& bytes) :
             Message(),
