@@ -541,10 +541,12 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 {
                     // Exact recovery policy at merge-base 31b60d86:
                     // try whole-frame -1 first, then whole-frame +1, and accept
-                    // any candidate whose payload CRC validates.
+                    // any candidate whose payload CRC validates. Historical code
+                    // did not restore decoder member state between the two retries;
+                    // preserve that behavior here even though the shifted symbol
+                    // vector itself is rebuilt from the original input each time.
                     for (int delta : {-1, 1})
                     {
-                        restoreLoRaState(baseState);
                         std::vector<unsigned short> shifted = msg.getSymbols();
 
                         for (size_t i = 0; i < shifted.size(); ++i)
