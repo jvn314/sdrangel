@@ -218,7 +218,7 @@ private:
     void updateTempIqCapture(const Complex& ci);
     TempIqCapture& startTempIqCapture(uint32_t frameId);
     void finalizeTempIqCapture(uint32_t frameId);
-    void writeTempIqCapture(const TempIqCapture& capture);
+    void writeTempIqCapture(TempIqCapture capture);
 };
 
 #endif // INCLUDE_MESHTASTICDEMODSINK_H

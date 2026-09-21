@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <thread>
+#include <utility>
 
 #include "dsp/dsptypes.h"
 #include "dsp/basebandsamplesink.h"
@@ -1299,7 +1301,7 @@ void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
     {
         if (it->frameFinalized && (it->postRemaining == 0U))
         {
-            writeTempIqCapture(*it);
+            writeTempIqCapture(std::move(*it));
             it = m_tempIqCaptures.erase(it);
         }
         else {
@@ -1369,51 +1371,56 @@ void MeshtasticDemodSink::finalizeTempIqCapture(uint32_t frameId)
     }
 }
 
-void MeshtasticDemodSink::writeTempIqCapture(const TempIqCapture& capture)
+void MeshtasticDemodSink::writeTempIqCapture(TempIqCapture capture)
 {
-    QFile file(capture.filePath);
+    // File conversion and I/O are deliberately moved off the DSP thread.
+    // The completed capture owns its sample vector, so the worker does not
+    // reference sink state after handoff.
+    std::thread([capture = std::move(capture)]() mutable {
+        QFile file(capture.filePath);
 
-    if (!file.open(QIODevice::WriteOnly))
-    {
-        qWarning().noquote()
-            << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 file=%2")
+        if (!file.open(QIODevice::WriteOnly))
+        {
+            qWarning().noquote()
+                << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 file=%2")
+                    .arg(capture.frameId)
+                    .arg(capture.filePath);
+            return;
+        }
+
+        QByteArray raw;
+        raw.resize(static_cast<qsizetype>(capture.samples.size() * 2U * sizeof(float)));
+        char *dst = raw.data();
+
+        for (const Complex& sample : capture.samples)
+        {
+            const float re = sample.real();
+            const float im = sample.imag();
+            quint32 reBits = 0U;
+            quint32 imBits = 0U;
+            std::memcpy(&reBits, &re, sizeof(float));
+            std::memcpy(&imBits, &im, sizeof(float));
+            reBits = qToLittleEndian(reBits);
+            imBits = qToLittleEndian(imBits);
+            std::memcpy(dst, &reBits, sizeof(quint32));
+            dst += sizeof(quint32);
+            std::memcpy(dst, &imBits, sizeof(quint32));
+            dst += sizeof(quint32);
+        }
+
+        const qint64 written = file.write(raw);
+        file.close();
+
+        qInfo().noquote()
+            << QStringLiteral("MESHTASTIC_IQ_CAPTURE frame=%1 samples=%2 sample_rate=%3 pre=%4 post=%5 bytes=%6 file=%7")
                 .arg(capture.frameId)
+                .arg(capture.samples.size())
+                .arg(capture.sampleRate)
+                .arg(capture.preRollSamples)
+                .arg(capture.postRollSamples)
+                .arg(written)
                 .arg(capture.filePath);
-        return;
-    }
-
-    QByteArray raw;
-    raw.resize(static_cast<qsizetype>(capture.samples.size() * 2U * sizeof(float)));
-    char *dst = raw.data();
-
-    for (const Complex& sample : capture.samples)
-    {
-        const float re = sample.real();
-        const float im = sample.imag();
-        quint32 reBits = 0U;
-        quint32 imBits = 0U;
-        std::memcpy(&reBits, &re, sizeof(float));
-        std::memcpy(&imBits, &im, sizeof(float));
-        reBits = qToLittleEndian(reBits);
-        imBits = qToLittleEndian(imBits);
-        std::memcpy(dst, &reBits, sizeof(quint32));
-        dst += sizeof(quint32);
-        std::memcpy(dst, &imBits, sizeof(quint32));
-        dst += sizeof(quint32);
-    }
-
-    const qint64 written = file.write(raw);
-    file.close();
-
-    qInfo().noquote()
-        << QStringLiteral("MESHTASTIC_IQ_CAPTURE frame=%1 samples=%2 sample_rate=%3 pre=%4 post=%5 bytes=%6 file=%7")
-            .arg(capture.frameId)
-            .arg(capture.samples.size())
-            .arg(capture.sampleRate)
-            .arg(capture.preRollSamples)
-            .arg(capture.postRollSamples)
-            .arg(written)
-            .arg(capture.filePath);
+    }).detach();
 }
 
 void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwidth, int channelFrequencyOffset, bool force)
