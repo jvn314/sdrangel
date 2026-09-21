@@ -80,6 +80,10 @@ namespace MeshtasticDemodMsg
         qint64 getTempDeviceCenterFrequencyHz() const { return m_tempDeviceCenterFrequencyHz; }
         int getTempInputFrequencyOffsetHz() const { return m_tempInputFrequencyOffsetHz; }
         int getTempChannelFrequencyOffsetHz() const { return m_tempChannelFrequencyOffsetHz; }
+        const QString& getTempIqCaptureFile() const { return m_tempIqCaptureFile; }
+        unsigned int getTempIqCaptureSampleRate() const { return m_tempIqCaptureSampleRate; }
+        unsigned int getTempIqPreRollSamples() const { return m_tempIqPreRollSamples; }
+        unsigned int getTempIqPostRollSamples() const { return m_tempIqPostRollSamples; }
 
         void pushBackSymbol(unsigned short symbol) {
             m_symbols.push_back(symbol);
@@ -109,6 +113,17 @@ namespace MeshtasticDemodMsg
             m_tempDeviceCenterFrequencyHz = deviceCenterFrequencyHz;
             m_tempInputFrequencyOffsetHz = inputFrequencyOffsetHz;
             m_tempChannelFrequencyOffsetHz = channelFrequencyOffsetHz;
+        }
+        void setTempIqCapture(
+            const QString& filePath,
+            unsigned int sampleRate,
+            unsigned int preRollSamples,
+            unsigned int postRollSamples)
+        {
+            m_tempIqCaptureFile = filePath;
+            m_tempIqCaptureSampleRate = sampleRate;
+            m_tempIqPreRollSamples = preRollSamples;
+            m_tempIqPostRollSamples = postRollSamples;
         }
 
         void pushBackMagnitudes(const std::vector<float>& magnitudes) {
@@ -156,6 +171,10 @@ namespace MeshtasticDemodMsg
         qint64 m_tempDeviceCenterFrequencyHz;
         int m_tempInputFrequencyOffsetHz;
         int m_tempChannelFrequencyOffsetHz;
+        QString m_tempIqCaptureFile;
+        unsigned int m_tempIqCaptureSampleRate;
+        unsigned int m_tempIqPreRollSamples;
+        unsigned int m_tempIqPostRollSamples;
 
         MsgDecodeSymbols() : //!< create an empty message
             Message(),
@@ -169,7 +188,10 @@ namespace MeshtasticDemodMsg
             m_pipelinePreset(),
             m_tempDeviceCenterFrequencyHz(0),
             m_tempInputFrequencyOffsetHz(0),
-            m_tempChannelFrequencyOffsetHz(0)
+            m_tempChannelFrequencyOffsetHz(0),
+            m_tempIqCaptureSampleRate(0U),
+            m_tempIqPreRollSamples(0U),
+            m_tempIqPostRollSamples(0U)
         {}
         MsgDecodeSymbols(const std::vector<unsigned short> symbols) : //!< create a message with symbols copy
             Message(),
@@ -183,7 +205,10 @@ namespace MeshtasticDemodMsg
             m_pipelinePreset(),
             m_tempDeviceCenterFrequencyHz(0),
             m_tempInputFrequencyOffsetHz(0),
-            m_tempChannelFrequencyOffsetHz(0)
+            m_tempChannelFrequencyOffsetHz(0),
+            m_tempIqCaptureSampleRate(0U),
+            m_tempIqPreRollSamples(0U),
+            m_tempIqPostRollSamples(0U)
         { m_symbols = symbols; }
     };
 
@@ -366,6 +391,10 @@ namespace MeshtasticDemodMsg
         qint64 getTempDeviceCenterFrequencyHz() const { return m_tempDeviceCenterFrequencyHz; }
         int getTempInputFrequencyOffsetHz() const { return m_tempInputFrequencyOffsetHz; }
         int getTempChannelFrequencyOffsetHz() const { return m_tempChannelFrequencyOffsetHz; }
+        const QString& getTempIqCaptureFile() const { return m_tempIqCaptureFile; }
+        unsigned int getTempIqCaptureSampleRate() const { return m_tempIqCaptureSampleRate; }
+        unsigned int getTempIqPreRollSamples() const { return m_tempIqPreRollSamples; }
+        unsigned int getTempIqPostRollSamples() const { return m_tempIqPostRollSamples; }
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
         const TempDecodeComparison& getTempDecodeComparison() const { return m_tempDecodeComparison; }
 
@@ -435,6 +464,17 @@ namespace MeshtasticDemodMsg
             m_tempInputFrequencyOffsetHz = inputFrequencyOffsetHz;
             m_tempChannelFrequencyOffsetHz = channelFrequencyOffsetHz;
         }
+        void setTempIqCapture(
+            const QString& filePath,
+            unsigned int sampleRate,
+            unsigned int preRollSamples,
+            unsigned int postRollSamples)
+        {
+            m_tempIqCaptureFile = filePath;
+            m_tempIqCaptureSampleRate = sampleRate;
+            m_tempIqPreRollSamples = preRollSamples;
+            m_tempIqPostRollSamples = postRollSamples;
+        }
         void setDechirpedSpectrum(const std::vector<std::vector<float>>& dechirpedSpectrum) {
             m_dechirpedSpectrum = dechirpedSpectrum;
         }
@@ -472,6 +512,10 @@ namespace MeshtasticDemodMsg
         qint64 m_tempDeviceCenterFrequencyHz;
         int m_tempInputFrequencyOffsetHz;
         int m_tempChannelFrequencyOffsetHz;
+        QString m_tempIqCaptureFile;
+        unsigned int m_tempIqCaptureSampleRate;
+        unsigned int m_tempIqPreRollSamples;
+        unsigned int m_tempIqPostRollSamples;
         std::vector<std::vector<float>> m_dechirpedSpectrum;
         TempDecodeComparison m_tempDecodeComparison;
 
@@ -500,7 +544,10 @@ namespace MeshtasticDemodMsg
             m_spreadFactor(0),
             m_tempDeviceCenterFrequencyHz(0),
             m_tempInputFrequencyOffsetHz(0),
-            m_tempChannelFrequencyOffsetHz(0)
+            m_tempChannelFrequencyOffsetHz(0),
+            m_tempIqCaptureSampleRate(0U),
+            m_tempIqPreRollSamples(0U),
+            m_tempIqPostRollSamples(0U)
         { }
     };
 

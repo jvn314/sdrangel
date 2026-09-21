@@ -638,6 +638,18 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
         MeshtasticDemodSettings::bandwidths[m_settings.m_bandwidthIndex]);
     rf["temp_current_spreading_factor"] = static_cast<int>(m_settings.m_spreadFactor);
 
+    if (!msg.getTempIqCaptureFile().isEmpty())
+    {
+        QJsonObject iqCapture;
+        iqCapture["format"] = QStringLiteral("cf32le");
+        iqCapture["file"] = msg.getTempIqCaptureFile();
+        iqCapture["sample_rate"] = static_cast<int>(msg.getTempIqCaptureSampleRate());
+        iqCapture["pre_roll_samples"] = static_cast<int>(msg.getTempIqPreRollSamples());
+        iqCapture["post_roll_samples"] = static_cast<int>(msg.getTempIqPostRollSamples());
+        iqCapture["capture_point"] = QStringLiteral("post_nco_interpolator_pre_processSampleLoRa");
+        rf["temp_iq_capture"] = iqCapture;
+    }
+
     root["rf"] = rf;
 
     // Identify the decoding pipeline that produced this packet using the

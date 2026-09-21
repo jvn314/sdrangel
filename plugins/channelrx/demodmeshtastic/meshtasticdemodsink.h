@@ -115,6 +115,24 @@ private:
     uint32_t m_loRaFrameId;
     static constexpr unsigned int m_headerFeedbackMaxWaitSteps = 128;
 
+    struct TempIqCapture
+    {
+        uint32_t frameId = 0U;
+        QString filePath;
+        std::vector<Complex> samples;
+        unsigned int preRollSamples = 0U;
+        unsigned int postRollSamples = 0U;
+        unsigned int postRemaining = 0U;
+        unsigned int sampleRate = 0U;
+        bool frameFinalized = false;
+    };
+
+    static constexpr unsigned int m_tempIqPreRollSymbols = 32U;
+    static constexpr unsigned int m_tempIqPostRollSymbols = 4U;
+    std::deque<Complex> m_tempIqPreRoll;
+    std::vector<TempIqCapture> m_tempIqCaptures;
+    unsigned int m_tempIqSampleRate;
+
     unsigned int m_osFactor;       //!< Oversampling factor at frame-sync input (gr-lora_sdr os_factor)
     unsigned int m_osCenterPhase;  //!< Selected downsample phase inside oversampled symbol
     unsigned int m_osCounter;      //!< Oversampled sample counter
@@ -197,6 +215,10 @@ private:
     float estimateLoRaSTOFrac();
     void buildLoRaPayloadDownchirp();
     void finalizeLoRaFrame();
+    void updateTempIqCapture(const Complex& ci);
+    TempIqCapture& startTempIqCapture(uint32_t frameId);
+    void finalizeTempIqCapture(uint32_t frameId);
+    void writeTempIqCapture(const TempIqCapture& capture);
 };
 
 #endif // INCLUDE_MESHTASTICDEMODSINK_H

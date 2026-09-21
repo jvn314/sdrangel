@@ -19,6 +19,11 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QStringList>
+#include <cstring>
+#include <QtEndian>
+#include <QStandardPaths>
+#include <QFile>
+#include <QDir>
 #include <stdio.h>
 #include <algorithm>
 #include <cmath>
@@ -48,6 +53,7 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
     m_waitHeaderFeedback(false),
     m_headerFeedbackWaitSteps(0U),
     m_loRaFrameId(0U),
+    m_tempIqSampleRate(0U),
     m_osFactor(MeshtasticDemodSettings::oversampling > 0 ? MeshtasticDemodSettings::oversampling : 1),
     m_osCenterPhase((MeshtasticDemodSettings::oversampling > 1 ? MeshtasticDemodSettings::oversampling / 2 : 0)),
     m_osCounter(0),
@@ -793,12 +799,14 @@ void MeshtasticDemodSink::finalizeLoRaFrame()
         delete m_decodeMsg;
     }
 
+    finalizeTempIqCapture(m_loRaFrameId);
     m_decodeMsg = nullptr;
     resetLoRaFrameSync();
 }
 
 void MeshtasticDemodSink::processSampleLoRa(const Complex& ci)
 {
+    updateTempIqCapture(ci);
     m_loRaSampleFifo.push_back(ci);
 
     while (true)
@@ -1126,6 +1134,13 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             m_loRaFrameId++;
             m_decodeMsg = MeshtasticDemodMsg::MsgDecodeSymbols::create();
             m_decodeMsg->setFrameId(m_loRaFrameId);
+            TempIqCapture& tempIqCapture = startTempIqCapture(m_loRaFrameId);
+            m_decodeMsg->setTempIqCapture(
+                tempIqCapture.filePath,
+                tempIqCapture.sampleRate,
+                tempIqCapture.preRollSamples,
+                tempIqCapture.postRollSamples
+            );
             // Freeze the RF and pipeline configuration that produced this frame.
             // Later channel or pipeline reconfiguration must not change the
             // provenance reported for this already-created frame.
@@ -1244,6 +1259,134 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
     return std::max(1, itemsToConsume);
 }
 
+void MeshtasticDemodSink::updateTempIqCapture(const Complex& ci)
+{
+    const size_t preRollLimit = static_cast<size_t>(m_tempIqPreRollSymbols) * m_loRaSymbolSpan;
+    m_tempIqPreRoll.push_back(ci);
+
+    while ((preRollLimit > 0U) && (m_tempIqPreRoll.size() > preRollLimit)) {
+        m_tempIqPreRoll.pop_front();
+    }
+
+    for (TempIqCapture& capture : m_tempIqCaptures)
+    {
+        capture.samples.push_back(ci);
+
+        if (capture.frameFinalized && (capture.postRemaining > 0U)) {
+            --capture.postRemaining;
+        }
+    }
+
+    for (auto it = m_tempIqCaptures.begin(); it != m_tempIqCaptures.end(); )
+    {
+        if (it->frameFinalized && (it->postRemaining == 0U))
+        {
+            writeTempIqCapture(*it);
+            it = m_tempIqCaptures.erase(it);
+        }
+        else {
+            ++it;
+        }
+    }
+}
+
+MeshtasticDemodSink::TempIqCapture& MeshtasticDemodSink::startTempIqCapture(uint32_t frameId)
+{
+    TempIqCapture capture;
+    capture.frameId = frameId;
+    capture.preRollSamples = static_cast<unsigned int>(m_tempIqPreRoll.size());
+    capture.postRollSamples = m_tempIqPostRollSymbols * m_loRaSymbolSpan;
+    capture.postRemaining = capture.postRollSamples;
+    capture.sampleRate = m_tempIqSampleRate > 0U
+        ? m_tempIqSampleRate
+        : static_cast<unsigned int>(std::max(1, m_bandwidth * static_cast<int>(m_osFactor)));
+    capture.samples.reserve(
+        capture.preRollSamples
+        + static_cast<size_t>(m_settings.m_nbSymbolsMax + m_tempIqPostRollSymbols + 8U) * m_loRaSymbolSpan
+    );
+    capture.samples.insert(
+        capture.samples.end(),
+        m_tempIqPreRoll.begin(),
+        m_tempIqPreRoll.end()
+    );
+
+    const QString captureDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+        + QStringLiteral("/SDRangel/meshtastic-iq-captures");
+    QDir().mkpath(captureDir);
+    const QString timestamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
+    capture.filePath = QStringLiteral("%1/frame-%2-%3.cf32")
+        .arg(captureDir)
+        .arg(frameId)
+        .arg(timestamp);
+
+    m_tempIqCaptures.push_back(std::move(capture));
+    return m_tempIqCaptures.back();
+}
+
+void MeshtasticDemodSink::finalizeTempIqCapture(uint32_t frameId)
+{
+    for (TempIqCapture& capture : m_tempIqCaptures)
+    {
+        if (capture.frameId == frameId)
+        {
+            capture.frameFinalized = true;
+
+            if (capture.postRollSamples == 0U) {
+                capture.postRemaining = 0U;
+            }
+
+            return;
+        }
+    }
+}
+
+void MeshtasticDemodSink::writeTempIqCapture(const TempIqCapture& capture)
+{
+    QFile file(capture.filePath);
+
+    if (!file.open(QIODevice::WriteOnly))
+    {
+        qWarning().noquote()
+            << QStringLiteral("MESHTASTIC_IQ_CAPTURE_WRITE_FAIL frame=%1 file=%2")
+                .arg(capture.frameId)
+                .arg(capture.filePath);
+        return;
+    }
+
+    QByteArray raw;
+    raw.resize(static_cast<qsizetype>(capture.samples.size() * 2U * sizeof(float)));
+    char *dst = raw.data();
+
+    for (const Complex& sample : capture.samples)
+    {
+        const float re = sample.real();
+        const float im = sample.imag();
+        quint32 reBits = 0U;
+        quint32 imBits = 0U;
+        std::memcpy(&reBits, &re, sizeof(float));
+        std::memcpy(&imBits, &im, sizeof(float));
+        reBits = qToLittleEndian(reBits);
+        imBits = qToLittleEndian(imBits);
+        std::memcpy(dst, &reBits, sizeof(quint32));
+        dst += sizeof(quint32);
+        std::memcpy(dst, &imBits, sizeof(quint32));
+        dst += sizeof(quint32);
+    }
+
+    const qint64 written = file.write(raw);
+    file.close();
+
+    qInfo().noquote()
+        << QStringLiteral("MESHTASTIC_IQ_CAPTURE frame=%1 samples=%2 sample_rate=%3 pre=%4 post=%5 bytes=%6 file=%7")
+            .arg(capture.frameId)
+            .arg(capture.samples.size())
+            .arg(capture.sampleRate)
+            .arg(capture.preRollSamples)
+            .arg(capture.postRollSamples)
+            .arg(written)
+            .arg(capture.filePath);
+}
+
 void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwidth, int channelFrequencyOffset, bool force)
 {
     qDebug() << "MeshtasticDemodSink::applyChannelSettings:"
@@ -1277,6 +1420,7 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
                 .arg(oldCutoffHz, 0, 'f', 3)
                 .arg(newCutoffHz, 0, 'f', 3);
         m_interpolator.create(16, channelSampleRate, newCutoffHz);
+        m_tempIqSampleRate = static_cast<unsigned int>(targetFrameSyncRate);
         m_interpolatorDistance = (Real) channelSampleRate / (Real) targetFrameSyncRate;
         m_sampleDistanceRemain = 0;
         m_osCounter = 0;

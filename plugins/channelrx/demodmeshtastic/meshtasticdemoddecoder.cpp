@@ -754,6 +754,12 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 msg.getTempInputFrequencyOffsetHz(),
                 msg.getTempChannelFrequencyOffsetHz()
             );
+            outputMsg->setTempIqCapture(
+                msg.getTempIqCaptureFile(),
+                msg.getTempIqCaptureSampleRate(),
+                msg.getTempIqPreRollSamples(),
+                msg.getTempIqPostRollSamples()
+            );
             // Pipeline ID and name identify the runtime, but the preset is frame-time
             // configuration provenance and therefore comes from the frame snapshot.
             outputMsg->setPipelineMetadata(m_pipelineId, m_pipelineName, msg.getPipelinePreset());
