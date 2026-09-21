@@ -87,7 +87,7 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
     m_deviceCenterFrequency = 0;
 	m_nco.setFreq(m_channelFrequencyOffset, m_channelSampleRate);
     {
-        const double cutoffHz = static_cast<double>(m_bandwidth) / 1.9;
+        const double loggedCutoffHz = static_cast<double>(m_bandwidth) / 1.9;
         qDebug().noquote()
             << QStringLiteral("MESHTASTIC_INTERP_CREATE ts=%1 frame=%2 reason=ctor channel_sr=%3 requested_bw=%4 previous_bw=%5 force=1 old_cutoff_hz=%6 new_cutoff_hz=%7")
                 .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs))
@@ -95,9 +95,11 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
                 .arg(m_channelSampleRate)
                 .arg(m_bandwidth)
                 .arg(m_bandwidth)
-                .arg(cutoffHz, 0, 'f', 3)
-                .arg(cutoffHz, 0, 'f', 3);
-        m_interpolator.create(16, m_channelSampleRate, cutoffHz);
+                .arg(loggedCutoffHz, 0, 'f', 3)
+                .arg(loggedCutoffHz, 0, 'f', 3);
+        // Preserve the original float cutoff expression exactly; logging must
+        // not perturb the filter under test.
+        m_interpolator.create(16, m_channelSampleRate, m_bandwidth / 1.9f);
     }
     m_interpolatorDistance = (Real) m_channelSampleRate / (Real) m_bandwidth;
     m_sampleDistanceRemain = 0;
@@ -1419,7 +1421,9 @@ void MeshtasticDemodSink::applyChannelSettings(int channelSampleRate, int bandwi
                 .arg(force ? 1 : 0)
                 .arg(oldCutoffHz, 0, 'f', 3)
                 .arg(newCutoffHz, 0, 'f', 3);
-        m_interpolator.create(16, channelSampleRate, newCutoffHz);
+        // Preserve the original float cutoff expression exactly; old/new
+        // cutoff values above are diagnostics only.
+        m_interpolator.create(16, channelSampleRate, bandwidth / 1.9f);
         m_tempIqSampleRate = static_cast<unsigned int>(targetFrameSyncRate);
         m_interpolatorDistance = (Real) channelSampleRate / (Real) targetFrameSyncRate;
         m_sampleDistanceRemain = 0;
