@@ -684,6 +684,29 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     // Report how the final LoRa decode was obtained.
     // This is diagnostic only; the recovery gate itself is unchanged.
     lora["binfix"]        = msg.getBinFix();
+    lora["binfix_delta"]  = msg.getBinFix() == QStringLiteral("cp") ? 1
+        : (msg.getBinFix() == QStringLiteral("cn") ? -1 : 0);
+
+    const MeshtasticDemodMsg::TempNetIdResidualDiagnostics& netIdDiag =
+        msg.getTempNetIdResidualDiagnostics();
+    QJsonObject netIdResidual;
+    netIdResidual["refinement_ran"] = netIdDiag.refinementRan;
+    netIdResidual["corr_len"] = static_cast<int>(netIdDiag.corrLen);
+    netIdResidual["cfo_int"] = netIdDiag.cfoInt;
+    netIdResidual["cfo_frac"] = netIdDiag.cfoFrac;
+    netIdResidual["sto_frac"] = netIdDiag.stoFrac;
+    netIdResidual["alignment_phase"] = static_cast<int>(netIdDiag.alignmentPhase);
+    netIdResidual["coarse_bin0"] = netIdDiag.coarseBin0;
+    netIdResidual["coarse_bin1"] = netIdDiag.coarseBin1;
+    netIdResidual["refined_bin0"] = netIdDiag.refinedBin0;
+    netIdResidual["refined_bin1"] = netIdDiag.refinedBin1;
+    netIdResidual["expected_bin0"] = netIdDiag.expectedBin0;
+    netIdResidual["expected_bin1"] = netIdDiag.expectedBin1;
+    netIdResidual["r0"] = netIdDiag.residual0;
+    netIdResidual["r1"] = netIdDiag.residual1;
+    netIdResidual["status"] = netIdDiag.status;
+    netIdResidual["predicted_correction"] = netIdDiag.predictedCorrection;
+    lora["temp_net_id_residual"] = netIdResidual;
 
     lora["early_eom"]     = msg.getEarlyEOM();
     lora["packet_length"] = static_cast<int>(msg.getPacketSize());

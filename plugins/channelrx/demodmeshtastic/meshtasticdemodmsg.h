@@ -62,6 +62,27 @@ namespace MeshtasticDemodMsg
         TempDecodePathResult current;
     };
 
+    // Temporary, logging-only diagnostics for the refined LoRa net-ID bins.
+    struct TempNetIdResidualDiagnostics
+    {
+        bool refinementRan = false;
+        unsigned int corrLen = 0U;
+        int cfoInt = 0;
+        float cfoFrac = 0.0f;
+        float stoFrac = 0.0f;
+        unsigned int alignmentPhase = 0U;
+        int coarseBin0 = 0;
+        int coarseBin1 = 0;
+        int refinedBin0 = 0;
+        int refinedBin1 = 0;
+        int expectedBin0 = 0;
+        int expectedBin1 = 0;
+        int residual0 = 0;
+        int residual1 = 0;
+        int predictedCorrection = 0;
+        QString status = QStringLiteral("not_measured");
+    };
+
     class MsgDecodeSymbols : public Message {
         MESSAGE_CLASS_DECLARATION
 
@@ -84,6 +105,7 @@ namespace MeshtasticDemodMsg
         unsigned int getTempIqCaptureSampleRate() const { return m_tempIqCaptureSampleRate; }
         unsigned int getTempIqPreRollSamples() const { return m_tempIqPreRollSamples; }
         unsigned int getTempIqPostRollSamples() const { return m_tempIqPostRollSamples; }
+        const TempNetIdResidualDiagnostics& getTempNetIdResidualDiagnostics() const { return m_tempNetIdResidualDiagnostics; }
 
         void pushBackSymbol(unsigned short symbol) {
             m_symbols.push_back(symbol);
@@ -124,6 +146,9 @@ namespace MeshtasticDemodMsg
             m_tempIqCaptureSampleRate = sampleRate;
             m_tempIqPreRollSamples = preRollSamples;
             m_tempIqPostRollSamples = postRollSamples;
+        }
+        void setTempNetIdResidualDiagnostics(const TempNetIdResidualDiagnostics& diagnostics) {
+            m_tempNetIdResidualDiagnostics = diagnostics;
         }
 
         void pushBackMagnitudes(const std::vector<float>& magnitudes) {
@@ -175,6 +200,7 @@ namespace MeshtasticDemodMsg
         unsigned int m_tempIqCaptureSampleRate;
         unsigned int m_tempIqPreRollSamples;
         unsigned int m_tempIqPostRollSamples;
+        TempNetIdResidualDiagnostics m_tempNetIdResidualDiagnostics;
 
         MsgDecodeSymbols() : //!< create an empty message
             Message(),
@@ -397,6 +423,7 @@ namespace MeshtasticDemodMsg
         unsigned int getTempIqPostRollSamples() const { return m_tempIqPostRollSamples; }
         const std::vector<std::vector<float>>& getDechirpedSpectrum() const { return m_dechirpedSpectrum; }
         const TempDecodeComparison& getTempDecodeComparison() const { return m_tempDecodeComparison; }
+        const TempNetIdResidualDiagnostics& getTempNetIdResidualDiagnostics() const { return m_tempNetIdResidualDiagnostics; }
 
         static MsgReportDecodeBytes* create(const QByteArray& bytes) {
             return new MsgReportDecodeBytes(bytes);
@@ -481,6 +508,9 @@ namespace MeshtasticDemodMsg
         void setTempDecodeComparison(const TempDecodeComparison& comparison) {
             m_tempDecodeComparison = comparison;
         }
+        void setTempNetIdResidualDiagnostics(const TempNetIdResidualDiagnostics& diagnostics) {
+            m_tempNetIdResidualDiagnostics = diagnostics;
+        }
 
     private:
         QByteArray m_bytes;
@@ -518,6 +548,7 @@ namespace MeshtasticDemodMsg
         unsigned int m_tempIqPostRollSamples;
         std::vector<std::vector<float>> m_dechirpedSpectrum;
         TempDecodeComparison m_tempDecodeComparison;
+        TempNetIdResidualDiagnostics m_tempNetIdResidualDiagnostics;
 
         MsgReportDecodeBytes(const QByteArray& bytes) :
             Message(),

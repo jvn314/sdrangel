@@ -1046,6 +1046,9 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 static_cast<unsigned int>(m_loRaPreambleUpchirps.size() / std::max(1U, m_nbSymbols))
             );
             const unsigned int corrLen = upSymCount * m_nbSymbols;
+            bool netIdRefinementRan = false;
+            int refinedNetIdBin0 = 0;
+            int refinedNetIdBin1 = 0;
 
             if (corrLen > 0U)
             {
@@ -1136,6 +1139,9 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
 
                 const int netid1 = static_cast<int>(getLoRaSymbolVal(netIdsDec.data(), m_settings.m_invertRamps ? m_upChirps : m_downChirps));
                 const int netid2 = static_cast<int>(getLoRaSymbolVal(netIdsDec.data() + m_nbSymbols, m_settings.m_invertRamps ? m_upChirps : m_downChirps));
+                netIdRefinementRan = true;
+                refinedNetIdBin0 = netid1;
+                refinedNetIdBin1 = netid2;
                 m_loRaNetIds[0] = netid1;
                 m_loRaNetIds[1] = netid2;
                 m_loRaNetIdOff = netid1;
@@ -1192,6 +1198,49 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 const unsigned int hiNibble = static_cast<unsigned int>(std::round(static_cast<double>(netIdBin0) / 8.0)) & 0xFU;
                 const unsigned int loNibble = static_cast<unsigned int>(std::round(static_cast<double>(netIdBin1) / 8.0)) & 0xFU;
                 m_decodeMsg->setSyncWord(loNibble + 16U * hiNibble);
+
+                MeshtasticDemodMsg::TempNetIdResidualDiagnostics diagnostics;
+                diagnostics.refinementRan = netIdRefinementRan;
+                diagnostics.corrLen = corrLen;
+                diagnostics.cfoInt = m_loRaCFOInt;
+                diagnostics.cfoFrac = m_loRaCFOFrac;
+                diagnostics.stoFrac = m_loRaSTOFrac;
+                diagnostics.alignmentPhase = m_osCenterPhase;
+                diagnostics.coarseBin0 = netIdBin0;
+                diagnostics.coarseBin1 = netIdBin1;
+                diagnostics.refinedBin0 = refinedNetIdBin0;
+                diagnostics.refinedBin1 = refinedNetIdBin1;
+
+                auto nibbleBin = [this](unsigned int nibble) {
+                    const int signedNibble = nibble < 8U
+                        ? static_cast<int>(nibble)
+                        : static_cast<int>(nibble) - 16;
+                    return loRaMod(8 * signedNibble, static_cast<int>(m_nbSymbols));
+                };
+                auto signedBin = [this](int bin) {
+                    int wrapped = loRaMod(bin, static_cast<int>(m_nbSymbols));
+                    if (wrapped >= static_cast<int>(m_nbSymbols / 2U)) {
+                        wrapped -= static_cast<int>(m_nbSymbols);
+                    }
+                    return wrapped;
+                };
+
+                diagnostics.expectedBin0 = nibbleBin(hiNibble);
+                diagnostics.expectedBin1 = nibbleBin(loNibble);
+                if (netIdRefinementRan)
+                {
+                    diagnostics.residual0 = signedBin(refinedNetIdBin0 - diagnostics.expectedBin0);
+                    diagnostics.residual1 = signedBin(refinedNetIdBin1 - diagnostics.expectedBin1);
+                    if (diagnostics.residual0 != diagnostics.residual1) {
+                        diagnostics.status = QStringLiteral("sync_disagree");
+                    } else if (std::abs(diagnostics.residual0) > 2) {
+                        diagnostics.status = QStringLiteral("residual_large");
+                    } else {
+                        diagnostics.status = QStringLiteral("valid");
+                        diagnostics.predictedCorrection = -diagnostics.residual0;
+                    }
+                }
+                m_decodeMsg->setTempNetIdResidualDiagnostics(diagnostics);
             }
             clearSpectrumHistoryForNewFrame();
             m_loRaFrameSymbolCount = 0U;
@@ -1513,7 +1562,7 @@ MeshtasticDemodSink::TempIqCapture *MeshtasticDemodSink::startTempIqCapture(uint
     );
 
     const QString captureDir =
-        QStringLiteral("C:/Users/jvn31/decoder-iq-diagnostics/captures");
+        QStringLiteral("C:/Users/jvn31/decoder-iq-diagnostics/capture2");
     QDir().mkpath(captureDir);
     const QString timestamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
     const QString uniqueSuffix = QUuid::createUuid().toString(QUuid::WithoutBraces);

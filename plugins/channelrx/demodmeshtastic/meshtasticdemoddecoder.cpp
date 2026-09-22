@@ -703,15 +703,31 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         // Shadow decodes must never change production behavior or state.
         restoreLoRaState(productionState);
 
+        const MeshtasticDemodMsg::TempNetIdResidualDiagnostics& netIdDiag =
+            msg.getTempNetIdResidualDiagnostics();
         qDebug(
-            "MeshtasticDemodDecoder::handleMessage: decode symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d",
+            "MeshtasticDemodDecoder::handleMessage: decode symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d binfix=%s netRefine=%d netStatus=%s netBins=%d,%d expected=%d,%d r=%d,%d predicted=%+d cfo=%d%+.6f sto=%+.6f phase=%u",
             msg.getSymbols().size(),
             static_cast<long long>(msgBytes.size()),
             m_earlyEOM ? 1 : 0,
             m_headerCRCStatus ? 1 : 0,
             m_payloadCRCStatus ? 1 : 0,
             m_headerParityStatus,
-            m_payloadParityStatus
+            m_payloadParityStatus,
+            qPrintable(binFix),
+            netIdDiag.refinementRan ? 1 : 0,
+            qPrintable(netIdDiag.status),
+            netIdDiag.refinedBin0,
+            netIdDiag.refinedBin1,
+            netIdDiag.expectedBin0,
+            netIdDiag.expectedBin1,
+            netIdDiag.residual0,
+            netIdDiag.residual1,
+            netIdDiag.predictedCorrection,
+            netIdDiag.cfoInt,
+            static_cast<double>(netIdDiag.cfoFrac),
+            static_cast<double>(netIdDiag.stoFrac),
+            netIdDiag.alignmentPhase
         );
 
         if (m_outputMessageQueue)
@@ -760,6 +776,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 msg.getTempIqPreRollSamples(),
                 msg.getTempIqPostRollSamples()
             );
+            outputMsg->setTempNetIdResidualDiagnostics(msg.getTempNetIdResidualDiagnostics());
             // Pipeline ID and name identify the runtime, but the preset is frame-time
             // configuration provenance and therefore comes from the frame snapshot.
             outputMsg->setPipelineMetadata(m_pipelineId, m_pipelineName, msg.getPipelinePreset());
