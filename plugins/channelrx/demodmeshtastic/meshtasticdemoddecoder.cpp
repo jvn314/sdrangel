@@ -706,7 +706,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         const MeshtasticDemodMsg::TempNetIdResidualDiagnostics& netIdDiag =
             msg.getTempNetIdResidualDiagnostics();
         qDebug(
-            "MeshtasticDemodDecoder::handleMessage: decode symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d binfix=%s netRefine=%d netStatus=%s netBins=%d,%d expected=%d,%d r=%d,%d predicted=%+d cfo=%d%+.6f sto=%+.6f phase=%u",
+            "MeshtasticDemodDecoder::handleMessage: decode symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d binfix=%s netRefine=%d netStatus=%s netBins=%d,%d expected=%d,%d r=%d,%d predicted=%+d cfo=%d%+.6f sto=%+.6f stoPayload=%+.6f stoWrapped=%d phase=%u",
             msg.getSymbols().size(),
             static_cast<long long>(msgBytes.size()),
             m_earlyEOM ? 1 : 0,
@@ -727,6 +727,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             netIdDiag.cfoInt,
             static_cast<double>(netIdDiag.cfoFrac),
             static_cast<double>(netIdDiag.stoFrac),
+            static_cast<double>(netIdDiag.stoFracPayload),
+            netIdDiag.stoWrapped ? 1 : 0,
             netIdDiag.alignmentPhase
         );
 

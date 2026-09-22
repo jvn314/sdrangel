@@ -70,6 +70,8 @@ namespace MeshtasticDemodMsg
         int cfoInt = 0;
         float cfoFrac = 0.0f;
         float stoFrac = 0.0f;
+        float stoFracPayload = 0.0f;
+        bool stoWrapped = false;
         unsigned int alignmentPhase = 0U;
         int coarseBin0 = 0;
         int coarseBin1 = 0;

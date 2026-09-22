@@ -1205,6 +1205,11 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 diagnostics.cfoInt = m_loRaCFOInt;
                 diagnostics.cfoFrac = m_loRaCFOFrac;
                 diagnostics.stoFrac = m_loRaSTOFrac;
+                diagnostics.stoFracPayload = m_loRaSTOFrac + m_loRaSFOHat * 4.25f;
+                diagnostics.stoWrapped = std::abs(diagnostics.stoFracPayload) > 0.5f;
+                if (diagnostics.stoWrapped) {
+                    diagnostics.stoFracPayload += diagnostics.stoFracPayload > 0.0f ? -1.0f : 1.0f;
+                }
                 diagnostics.alignmentPhase = m_osCenterPhase;
                 diagnostics.coarseBin0 = netIdBin0;
                 diagnostics.coarseBin1 = netIdBin1;

@@ -695,6 +695,8 @@ QString MeshtasticDemod::buildMeshtasticJsonPacket(
     netIdResidual["cfo_int"] = netIdDiag.cfoInt;
     netIdResidual["cfo_frac"] = netIdDiag.cfoFrac;
     netIdResidual["sto_frac"] = netIdDiag.stoFrac;
+    netIdResidual["sto_frac_payload"] = netIdDiag.stoFracPayload;
+    netIdResidual["sto_wrapped"] = netIdDiag.stoWrapped;
     netIdResidual["alignment_phase"] = static_cast<int>(netIdDiag.alignmentPhase);
     netIdResidual["coarse_bin0"] = netIdDiag.coarseBin0;
     netIdResidual["coarse_bin1"] = netIdDiag.coarseBin1;
