@@ -18,6 +18,8 @@
 #include <QTime>
 #include <QDebug>
 #include <QStringList>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <stdio.h>
 #include <algorithm>
 #include <cmath>
@@ -33,6 +35,7 @@
 #include "meshtasticdemodmsg.h"
 #include "meshtasticdemoddecoderlora.h"
 #include "meshtasticdemodsink.h"
+#include "meshtasticdemodfilelog.h"
 
 MeshtasticDemodSink::MeshtasticDemodSink() :
     m_decodeMsg(nullptr),
@@ -95,6 +98,27 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
     m_fftInterpolation = m_loRaFFTInterpolation;
 
     initSF(m_settings.m_spreadFactor, m_settings.m_deBits);
+
+    // Test switches (environment), read once:
+    //   MESHTASTIC_UPBIN_SHIFT    = on (default) | off (measure/log only) | invert (sign test)
+    //   MESHTASTIC_STO_WRAP_CARRY = on (default) | off
+    const QByteArray upBinEnv = qgetenv("MESHTASTIC_UPBIN_SHIFT").trimmed().toLower();
+    if ((upBinEnv == "off") || (upBinEnv == "0")) {
+        m_upBinShiftMode = 0;
+    } else if ((upBinEnv == "invert") || (upBinEnv == "-1")) {
+        m_upBinShiftMode = -1;
+    } else {
+        m_upBinShiftMode = 1;
+    }
+    const QByteArray wrapEnv = qgetenv("MESHTASTIC_STO_WRAP_CARRY").trimmed().toLower();
+    m_stoWrapCarry = !((wrapEnv == "off") || (wrapEnv == "0"));
+
+    QJsonObject rec;
+    rec.insert(QStringLiteral("type"), QStringLiteral("config"));
+    rec.insert(QStringLiteral("upBinShiftMode"), m_upBinShiftMode);
+    rec.insert(QStringLiteral("stoWrapCarry"), m_stoWrapCarry);
+    rec.insert(QStringLiteral("logPath"), MeshtasticDemodFileLog::path());
+    MeshtasticDemodFileLog::append(rec);
 }
 
 MeshtasticDemodSink::~MeshtasticDemodSink()
@@ -535,6 +559,16 @@ void MeshtasticDemodSink::resetLoRaFrameSync()
     m_loRaAdditionalUpchirps = 0;
     m_loRaCFOFrac = 0.0f;
     m_loRaSTOFrac = 0.0f;
+    m_loRaPendingShift = 0;
+    m_diagKHat = 0;
+    m_diagStoFracInitial = 0.0f;
+    m_diagUpBinResidual = 0;
+    m_diagLookBins[0] = m_diagLookBins[1] = m_diagLookBins[2] = 0;
+    m_diagLookIdentifiable = false;
+    m_diagVeto = false;
+    m_diagAppliedShift = 0;
+    m_diagNetId1Bins.clear();
+    m_diagNetId1Accepted.clear();
     m_loRaSFOHat = 0.0f;
     m_loRaSFOCum = 0.0f;
     m_loRaCFOSTOEstimated = false;
@@ -685,7 +719,7 @@ float MeshtasticDemodSink::estimateLoRaCFOFracBernier(const Complex *samples)
     return cfoFrac;
 }
 
-float MeshtasticDemodSink::estimateLoRaSTOFrac()
+float MeshtasticDemodSink::estimateLoRaSTOFrac(int *upBinResidual)
 {
     if (m_loRaUpSymbToUse <= 0) {
         return 0.0f;
@@ -725,9 +759,17 @@ float MeshtasticDemodSink::estimateLoRaSTOFrac()
     const double v = u * 2.4674;
     const double wa = (Y1 - Y_1) / (u * (Y1 + Y_1) + v * Y0 + 1e-12);
     const double ka = wa * m_nbSymbols / M_PI;
-    const double kres = std::fmod((k0 + ka) / 2.0, 1.0);
+    // Refined peak position in N-bin units relative to the current alignment,
+    // wrapped to (-N/2, N/2]. Keep the integer part (the upchirp-bin residual
+    // left by detection alignment) instead of discarding it.
+    const double pos = std::remainder((k0 + ka) / 2.0, static_cast<double>(m_nbSymbols));
+    const double posInt = std::round(pos);
 
-    return static_cast<float>(kres - (kres > 0.5 ? 1.0 : 0.0));
+    if (upBinResidual) {
+        *upBinResidual = static_cast<int>(posInt);
+    }
+
+    return static_cast<float>(pos - posInt);
 }
 
 void MeshtasticDemodSink::buildLoRaPayloadDownchirp()
@@ -754,6 +796,81 @@ void MeshtasticDemodSink::buildLoRaPayloadDownchirp()
         ref *= Complex(std::cos(cfoPhase), std::sin(cfoPhase));
         m_loRaPayloadDownchirp[n] = ref;
     }
+}
+
+int MeshtasticDemodSink::lookaheadUpBin(int fifoOffset)
+{
+    // Dechirp the window starting fifoOffset samples into the FIFO, using the
+    // current fractional STO/CFO corrections, and return its signed peak bin.
+    const int stoShift = loRaRound(m_loRaSTOFrac * static_cast<float>(m_osFactor));
+    const int fifoLast = static_cast<int>(m_loRaSampleFifo.size()) - 1;
+    std::vector<Complex> win(m_nbSymbols);
+
+    for (unsigned int ii = 0; ii < m_nbSymbols; ii++)
+    {
+        int idx = fifoOffset + static_cast<int>(m_osCenterPhase + m_osFactor * ii) - stoShift;
+        idx = std::max(0, std::min(idx, fifoLast));
+        win[ii] = m_loRaSampleFifo[static_cast<size_t>(idx)] * m_loRaCFOFracCorrec[ii];
+    }
+
+    const Complex *ref = m_settings.m_invertRamps ? m_upChirps : m_downChirps;
+    const int bin = static_cast<int>(getLoRaSymbolVal(win.data(), ref, nullptr, false));
+    const int N = static_cast<int>(m_nbSymbols);
+    return (bin > N / 2) ? (bin - N) : bin;
+}
+
+void MeshtasticDemodSink::logSyncDiagnostics(unsigned int syncWord, int stoWrap, int transitionConsumed)
+{
+    QJsonObject rec;
+    rec.insert(QStringLiteral("type"), QStringLiteral("sync"));
+    rec.insert(QStringLiteral("frameId"), static_cast<qint64>(m_loRaFrameId));
+    rec.insert(QStringLiteral("sf"), static_cast<int>(m_settings.m_spreadFactor));
+    rec.insert(QStringLiteral("osFactor"), static_cast<int>(m_osFactor));
+    rec.insert(QStringLiteral("mode"), m_upBinShiftMode);
+    rec.insert(QStringLiteral("kHat"), m_diagKHat);
+    rec.insert(QStringLiteral("cfoFrac"), static_cast<double>(m_loRaCFOFrac));
+    rec.insert(QStringLiteral("stoFracInitial"), static_cast<double>(m_diagStoFracInitial));
+    // Window read offset used for the NetId1 reads and the look-ahead windows
+    // (same loRaRound rule as processLoRaFrameSyncStep). At -2 the live window
+    // clamps its last index while the look-ahead reads the real sample.
+    rec.insert(QStringLiteral("stoShift"), loRaRound(m_diagStoFracInitial * static_cast<float>(m_osFactor)));
+    rec.insert(QStringLiteral("upBinResidual"), m_diagUpBinResidual);
+    QJsonArray look;
+    look.append(m_diagLookBins[0]); // consume delta -osFactor
+    look.append(m_diagLookBins[1]); // consume delta 0
+    look.append(m_diagLookBins[2]); // consume delta +osFactor
+    rec.insert(QStringLiteral("lookBins"), look);
+    rec.insert(QStringLiteral("lookIdentifiable"), m_diagLookIdentifiable);
+    rec.insert(QStringLiteral("veto"), m_diagVeto);
+    rec.insert(QStringLiteral("appliedShift"), m_diagAppliedShift);
+    QJsonArray netBins;
+    QJsonArray netAcc;
+    for (size_t i = 0; i < m_diagNetId1Bins.size(); i++)
+    {
+        netBins.append(m_diagNetId1Bins[i]);
+        netAcc.append(m_diagNetId1Accepted[i] != 0);
+    }
+    rec.insert(QStringLiteral("netId1Bins"), netBins);          // index 0 is read before the shift
+    rec.insert(QStringLiteral("netId1Accepted"), netAcc);
+    rec.insert(QStringLiteral("downVal"), m_loRaDownVal);
+    rec.insert(QStringLiteral("downValOdd"), (m_loRaDownVal & 1) != 0);
+    rec.insert(QStringLiteral("cfoInt"), m_loRaCFOInt);
+    rec.insert(QStringLiteral("sfoHat"), static_cast<double>(m_loRaSFOHat));
+    rec.insert(QStringLiteral("stoFracFinal"), static_cast<double>(m_loRaSTOFrac));
+    rec.insert(QStringLiteral("stoWrap"), stoWrap);
+    rec.insert(QStringLiteral("stoWrapCarried"), (stoWrap != 0) && m_stoWrapCarry);
+    rec.insert(QStringLiteral("transitionConsumed"), transitionConsumed);
+    rec.insert(QStringLiteral("syncWord"), static_cast<int>(syncWord));
+    QJsonObject totals;
+    totals.insert(QStringLiteral("frames"), static_cast<qint64>(m_diagFrames));
+    totals.insert(QStringLiteral("residualNonzero"), static_cast<qint64>(m_diagResidualNonzero));
+    totals.insert(QStringLiteral("lookIdentifiable"), static_cast<qint64>(m_diagLookIdentifiableCount));
+    totals.insert(QStringLiteral("noLook"), static_cast<qint64>(m_diagNoLookCount));
+    totals.insert(QStringLiteral("vetoes"), static_cast<qint64>(m_diagVetoCount));
+    totals.insert(QStringLiteral("applied"), static_cast<qint64>(m_diagAppliedCount));
+    totals.insert(QStringLiteral("stoWraps"), static_cast<qint64>(m_diagStoWrapCount));
+    rec.insert(QStringLiteral("totals"), totals);
+    MeshtasticDemodFileLog::append(rec);
 }
 
 void MeshtasticDemodSink::finalizeLoRaFrame()
@@ -797,6 +914,12 @@ void MeshtasticDemodSink::processSampleLoRa(const Complex& ci)
         }
 
         int consumed = processLoRaFrameSyncStep();
+
+        if (m_loRaPendingShift != 0)
+        {
+            consumed += m_loRaPendingShift;
+            m_loRaPendingShift = 0;
+        }
 
         if (consumed <= 0) {
             consumed = 1;
@@ -929,12 +1052,66 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 m_loRaCFOFrac = 0.0f;
             }
 
-            m_loRaSTOFrac = estimateLoRaSTOFrac();
+            int upBinResidual = 0;
+            m_loRaSTOFrac = estimateLoRaSTOFrac(&upBinResidual);
 
             for (unsigned int n = 0; n < m_nbSymbols; n++)
             {
                 const float phase = -2.0f * static_cast<float>(M_PI) * m_loRaCFOFrac * static_cast<float>(n) / static_cast<float>(m_nbSymbols);
                 m_loRaCFOFracCorrec[n] = Complex(std::cos(phase), std::sin(phase));
+            }
+
+            // Integer upchirp-bin residual realignment.
+            // Detection aligned the window on the mode of uncorrected preamble bins;
+            // after fractional CFO/STO correction the upchirp peak can still sit one
+            // bin off (upBinResidual = +/-1). The current (first Sync) window has
+            // already been read on the old grid; the shift applies to the windows
+            // after it, so the remaining net-ID windows, the downchirps and the
+            // payload use the corrected grid, and the existing CFOInt = floor(downVal/2)
+            // runs with s_up close to zero. Detection consumes osFactor*(N - b) to
+            // move bin b to 0, so residual r needs -osFactor*r extra samples.
+            // Look-ahead veto: the FIFO holds 3 symbol spans in Sync, so the next
+            // window can be dechirped at consume deltas -os, 0 and +os. If it is a
+            // clear upchirp that favours the unshifted alignment, do not shift.
+            const int os = static_cast<int>(m_osFactor);
+            const int span = static_cast<int>(m_loRaSymbolSpan);
+            m_diagKHat = m_loRaKHat;
+            m_diagStoFracInitial = m_loRaSTOFrac;
+            m_diagUpBinResidual = upBinResidual;
+            m_diagLookBins[0] = lookaheadUpBin(span - os);
+            m_diagLookBins[1] = lookaheadUpBin(span);
+            m_diagLookBins[2] = lookaheadUpBin(span + os);
+
+            if (std::abs(upBinResidual) == 1)
+            {
+                m_diagResidualNonzero++;
+                const int derivedShift = -upBinResidual * os;       // derived sign
+                const int modeShift = (m_upBinShiftMode < 0) ? -derivedShift : derivedShift;
+                const int bApply = m_diagLookBins[(modeShift < 0) ? 0 : 2];
+                const int bKeep = m_diagLookBins[1];
+                m_diagLookIdentifiable = (std::min(std::abs(bApply), std::abs(bKeep)) <= 2);
+
+                if (m_diagLookIdentifiable) {
+                    m_diagLookIdentifiableCount++;
+                } else {
+                    m_diagNoLookCount++;
+                }
+
+                if (m_upBinShiftMode != 0)
+                {
+                    m_diagVeto = m_diagLookIdentifiable && (std::abs(bKeep) < std::abs(bApply));
+
+                    if (m_diagVeto)
+                    {
+                        m_diagVetoCount++;
+                    }
+                    else
+                    {
+                        m_loRaPendingShift = modeShift;
+                        m_diagAppliedShift = modeShift;
+                        m_diagAppliedCount++;
+                    }
+                }
             }
 
             m_loRaCFOSTOEstimated = true;
@@ -950,6 +1127,16 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
         switch (m_loRaSyncState)
         {
         case LoRaSyncNetId1:
+        {
+            const bool acceptedUp = (binIdx == 0) || (binIdx == 1) || (binIdx == static_cast<int>(m_nbSymbols) - 1);
+
+            if (m_diagNetId1Bins.size() < 8U)
+            {
+                const int N = static_cast<int>(m_nbSymbols);
+                m_diagNetId1Bins.push_back((binIdx > N / 2) ? (binIdx - N) : binIdx);
+                m_diagNetId1Accepted.push_back(acceptedUp ? 1 : 0);
+            }
+        }
             if ((binIdx == 0) || (binIdx == 1) || (binIdx == static_cast<int>(m_nbSymbols) - 1))
             {
                 const size_t dstOfs = static_cast<size_t>(m_loRaRequiredUpchirps + m_loRaAdditionalUpchirps) * m_loRaSymbolSpan;
@@ -1113,6 +1300,7 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             m_loRaFrameId++;
             m_decodeMsg = MeshtasticDemodMsg::MsgDecodeSymbols::create();
             m_decodeMsg->setFrameId(m_loRaFrameId);
+            unsigned int frameSyncWord = 0U;
             {
                 // LoRa sync word is encoded across two net-ID chirps.
                 // First chirp (index 0) carries the high nibble, second (index 1) the low nibble.
@@ -1122,7 +1310,8 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 // require m_loRaNetIdSamp to be fully populated.
                 const unsigned int hiNibble = static_cast<unsigned int>(std::round(static_cast<double>(netIdBin0) / 8.0)) & 0xFU;
                 const unsigned int loNibble = static_cast<unsigned int>(std::round(static_cast<double>(netIdBin1) / 8.0)) & 0xFU;
-                m_decodeMsg->setSyncWord(loNibble + 16U * hiNibble);
+                frameSyncWord = loNibble + 16U * hiNibble;
+                m_decodeMsg->setSyncWord(frameSyncWord);
             }
             clearSpectrumHistoryForNewFrame();
             m_loRaFrameSymbolCount = 0U;
@@ -1133,14 +1322,33 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             m_headerFeedbackWaitSteps = 0U;
             m_demodActive = true;
             m_loRaSTOFrac += m_loRaSFOHat * 4.25f;
-            if (std::abs(m_loRaSTOFrac) > 0.5f) {
-                m_loRaSTOFrac += (m_loRaSTOFrac > 0.0f) ? -1.0f : 1.0f;
+            // Keep the window read offset in range by wrapping STO to +/-0.5, but
+            // carry the removed whole sample into FIFO consumption. Without the
+            // carry, the wrap moves every payload window by osFactor samples,
+            // i.e. one symbol bin.
+            // Sign: d = wrappedSTO - unwrappedSTO (stoWrap). stoShift changes by
+            // d*osFactor, so read positions (base - stoShift) move by -d*osFactor;
+            // consuming d*osFactor more samples offsets that exactly.
+            int stoWrap = 0;
+            if (std::abs(m_loRaSTOFrac) > 0.5f)
+            {
+                stoWrap = (m_loRaSTOFrac > 0.0f) ? -1 : 1;
+                m_loRaSTOFrac += static_cast<float>(stoWrap);
+                m_diagStoWrapCount++;
             }
             const float stoQuant = static_cast<float>(loRaRound(m_loRaSTOFrac * static_cast<float>(m_osFactor)));
             m_loRaSFOCum = ((m_loRaSTOFrac * static_cast<float>(m_osFactor)) - stoQuant) / static_cast<float>(m_osFactor);
             m_loRaState = LoRaStateSFOCompensation;
             m_loRaSyncState = LoRaSyncNetId1;
-            return std::max(1, static_cast<int>(m_loRaSymbolSpan / 4U + static_cast<int>(m_osFactor) * m_loRaCFOInt));
+            int transitionConsumed = static_cast<int>(m_loRaSymbolSpan / 4U + static_cast<int>(m_osFactor) * m_loRaCFOInt);
+
+            if ((stoWrap != 0) && m_stoWrapCarry) {
+                transitionConsumed += stoWrap * static_cast<int>(m_osFactor);
+            }
+
+            m_diagFrames++;
+            logSyncDiagnostics(frameSyncWord, stoWrap, transitionConsumed);
+            return std::max(1, transitionConsumed);
         }
 
         return static_cast<int>(m_loRaSymbolSpan);

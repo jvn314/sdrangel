@@ -22,6 +22,9 @@
 #include "meshtasticdemoddecoder.h"
 #include "meshtasticdemoddecoderlora.h"
 #include "meshtasticdemodmsg.h"
+#include "meshtasticdemodfilelog.h"
+
+#include <QJsonObject>
 
 MeshtasticDemodDecoder::MeshtasticDemodDecoder() :
     m_codingScheme(MeshtasticDemodSettings::CodingLoRa),
@@ -404,6 +407,20 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             if (!recovered) {
                 restoreLoRaState(baseState);
             }
+        }
+
+        {
+            // Decode outcome, joinable with the sink's "sync" record by frameId.
+            QJsonObject rec;
+            rec.insert(QStringLiteral("type"), QStringLiteral("decode"));
+            rec.insert(QStringLiteral("frameId"), static_cast<qint64>(msg.getFrameId()));
+            rec.insert(QStringLiteral("pipeline"), m_pipelineName);
+            rec.insert(QStringLiteral("binfix"), binFix);
+            rec.insert(QStringLiteral("hasCRC"), m_hasCRC);
+            rec.insert(QStringLiteral("hCRC"), m_headerCRCStatus);
+            rec.insert(QStringLiteral("pCRC"), m_payloadCRCStatus);
+            rec.insert(QStringLiteral("syncWord"), static_cast<int>(msgSyncWord));
+            MeshtasticDemodFileLog::append(rec);
         }
 
         qDebug(

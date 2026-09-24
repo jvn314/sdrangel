@@ -147,6 +147,31 @@ private:
     unsigned int m_loRaFrameSymbolCount;
     float m_loRaCFOFrac;
     float m_loRaSTOFrac;
+
+    // Integer upchirp-bin residual realignment and STO wrap carry (see resetLoRaFrameSync()).
+    int m_loRaPendingShift = 0;      //!< Extra FIFO samples to consume once, after the first Sync step
+    int m_upBinShiftMode = 1;        //!< 1: apply, 0: measure/log only, -1: apply with inverted sign (sign test)
+    bool m_stoWrapCarry = true;      //!< Carry the transition STO wrap into FIFO consumption
+
+    // Per-frame diagnostics, written to the file log at the Sync -> payload transition
+    int m_diagKHat = 0;
+    float m_diagStoFracInitial = 0.0f;
+    int m_diagUpBinResidual = 0;
+    int m_diagLookBins[3] = {0, 0, 0}; //!< Look-ahead upchirp bin at consume delta -osFactor, 0, +osFactor
+    bool m_diagLookIdentifiable = false;
+    bool m_diagVeto = false;
+    int m_diagAppliedShift = 0;
+    std::vector<int> m_diagNetId1Bins;
+    std::vector<int> m_diagNetId1Accepted;
+
+    // Cumulative counters
+    quint64 m_diagFrames = 0;
+    quint64 m_diagResidualNonzero = 0;
+    quint64 m_diagLookIdentifiableCount = 0;
+    quint64 m_diagNoLookCount = 0;
+    quint64 m_diagVetoCount = 0;
+    quint64 m_diagAppliedCount = 0;
+    quint64 m_diagStoWrapCount = 0;
     float m_loRaSFOHat;
     float m_loRaSFOCum;
     bool m_loRaCFOSTOEstimated;
@@ -194,7 +219,9 @@ private:
         bool publishSpectrum = false
     );
     float estimateLoRaCFOFracBernier(const Complex *samples);
-    float estimateLoRaSTOFrac();
+    float estimateLoRaSTOFrac(int *upBinResidual = nullptr);
+    int lookaheadUpBin(int fifoOffset);
+    void logSyncDiagnostics(unsigned int syncWord, int stoWrap, int transitionConsumed);
     void buildLoRaPayloadDownchirp();
     void finalizeLoRaFrame();
 };

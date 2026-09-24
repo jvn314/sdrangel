@@ -16,6 +16,7 @@ set(meshtastic_HEADERS
 	meshtasticdemod.h
 	meshtasticdemodsettings.h
 	meshtasticdemodsink.h
+	meshtasticdemodfilelog.h
 	meshtasticdemodbaseband.h
 	meshtasticdemoddecoder.h
     meshtasticdemoddecoderlora.h
