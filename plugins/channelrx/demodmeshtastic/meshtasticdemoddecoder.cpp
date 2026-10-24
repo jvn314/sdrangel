@@ -338,7 +338,8 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         }
 
         qDebug(
-            "MeshtasticDemodDecoder::handleMessage: decode symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d",
+            "MeshtasticDemodDecoder::handleMessage: decode frameId=%u symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d",
+            msg.getFrameId(),
             msg.getSymbols().size(),
             static_cast<long long>(msgBytes.size()),
             m_earlyEOM ? 1 : 0,

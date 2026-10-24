@@ -57,7 +57,6 @@ MeshtasticDemodSink::MeshtasticDemodSink() :
     m_loRaKHat(0),
     m_loRaDownVal(0),
     m_loRaCFOInt(0),
-    m_loRaNetIdOff(0),
     m_loRaAdditionalUpchirps(0),
     m_loRaUpSymbToUse(0),
     m_loRaRequiredUpchirps(0),
@@ -154,7 +153,6 @@ void MeshtasticDemodSink::initSF(unsigned int sf, unsigned int deBits)
     m_loRaCFOFracCorrec.assign(m_nbSymbols, Complex{1.0f, 0.0f});
     m_loRaPayloadDownchirp.assign(m_nbSymbols, Complex{1.0f, 0.0f});
     m_loRaSymbCorr.assign(m_nbSymbols, Complex{0.0f, 0.0f});
-    m_loRaNetIdSamp.assign((m_loRaSymbolSpan * 5U) / 2U + m_loRaSymbolSpan, Complex{0.0f, 0.0f});
     m_loRaAdditionalSymbolSamp.assign(m_loRaSymbolSpan * 2U, Complex{0.0f, 0.0f});
     m_loRaPreambleVals.assign(m_loRaRequiredUpchirps, 0);
     m_loRaNetIds.assign(2, 0);
@@ -532,7 +530,6 @@ void MeshtasticDemodSink::resetLoRaFrameSync()
     m_loRaKHat = 0;
     m_loRaDownVal = 0;
     m_loRaCFOInt = 0;
-    m_loRaNetIdOff = 0;
     m_loRaAdditionalUpchirps = 0;
     m_loRaCFOFrac = 0.0f;
     m_loRaSTOFrac = 0.0f;
@@ -917,16 +914,6 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             }
 
             m_loRaKHat = static_cast<int>(bestBin);
-            const int netStart = static_cast<int>(0.75f * static_cast<float>(m_loRaSymbolSpan)) - m_loRaKHat * static_cast<int>(m_osFactor);
-
-            for (unsigned int i = 0; i < m_loRaSymbolSpan / 4U; i++)
-            {
-                const int src = std::max(0, std::min(netStart + static_cast<int>(i), static_cast<int>(m_loRaSampleFifo.size()) - 1));
-                if (i < m_loRaNetIdSamp.size()) {
-                    m_loRaNetIdSamp[i] = m_loRaSampleFifo[static_cast<size_t>(src)];
-                }
-            }
-
             return static_cast<int>(m_osFactor * (m_nbSymbols - bestBin));
         }
 
@@ -964,6 +951,9 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 m_loRaCFOFracCorrec[n] = Complex(std::cos(phase), std::sin(phase));
             }
 
+            // Identify initial timing and the integer alignment applied to this frame.
+            qDebug("MeshtasticDemodSink::timingInitial: frameId=%u cfoFrac=%.6f stoFrac=%.6f upBinResidual=%d pendingShift=%d",
+                m_loRaFrameId + 1U, m_loRaCFOFrac, m_loRaSTOFrac, upBinResidual, m_loRaPendingShift);
             m_loRaCFOSTOEstimated = true;
         }
 
@@ -1024,9 +1014,7 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 (static_cast<double>(m_loRaCFOInt) + static_cast<double>(m_loRaCFOFrac))
                 * static_cast<double>(m_bandwidth) / static_cast<double>(m_nbSymbols);
 
-            // Preserve state-machine net ID bin indices for sync word extraction.
-            // The corrLen-based refinement overwrites m_loRaNetIds but may produce
-            // incorrect results when m_loRaNetIdSamp is not fully populated.
+            // Use measured sync-word bins; the removed net-ID refinement lacked complete samples.
             const int netIdBin0 = m_loRaNetIds[0];
             const int netIdBin1 = m_loRaNetIds[1];
 
@@ -1093,41 +1081,15 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 const float tmpSto = estimateLoRaSTOFrac();
                 const float diffSto = m_loRaSTOFrac - tmpSto;
 
-                if (std::abs(diffSto) <= (static_cast<float>(m_osFactor) - 1.0f) / static_cast<float>(m_osFactor)) {
+                // Record refinement decisions without changing the existing acceptance rule.
+                const bool stoAccepted = std::abs(diffSto)
+                    <= (static_cast<float>(m_osFactor) - 1.0f) / static_cast<float>(m_osFactor);
+                qDebug("MeshtasticDemodSink::timingRefinement: frameId=%u oldSto=%.6f newSto=%.6f diffSto=%.6f accepted=%d corrLen=%u",
+                    m_loRaFrameId + 1U, m_loRaSTOFrac, tmpSto, diffSto, stoAccepted ? 1 : 0, corrLen);
+                if (stoAccepted) {
                     m_loRaSTOFrac = tmpSto;
                 }
 
-                std::vector<Complex> netIdsDec(2U * m_nbSymbols, Complex{0.0f, 0.0f});
-                const int startOff = static_cast<int>(m_osFactor / 2U)
-                    - loRaRound(m_loRaSTOFrac * static_cast<float>(m_osFactor))
-                    + static_cast<int>(m_osFactor)
-                        * (static_cast<int>(0.25f * static_cast<float>(m_nbSymbols)) + m_loRaCFOInt);
-
-                for (unsigned int i = 0; i < 2U * m_nbSymbols; i++)
-                {
-                    const int idx = std::max(
-                        0,
-                        std::min(startOff + static_cast<int>(i * m_osFactor), static_cast<int>(m_loRaNetIdSamp.size()) - 1)
-                    );
-                    netIdsDec[i] = m_loRaNetIdSamp[static_cast<size_t>(idx)];
-                }
-
-                for (unsigned int i = 0; i < 2U * m_nbSymbols; i++)
-                {
-                    netIdsDec[i] *= cfoIntCorrec[i % std::max(1U, corrLen)];
-
-                    const float phase = -2.0f * static_cast<float>(M_PI)
-                        * m_loRaCFOFrac
-                        * static_cast<float>(i % m_nbSymbols)
-                        / static_cast<float>(m_nbSymbols);
-                    netIdsDec[i] *= Complex(std::cos(phase), std::sin(phase));
-                }
-
-                const int netid1 = static_cast<int>(getLoRaSymbolVal(netIdsDec.data(), m_settings.m_invertRamps ? m_upChirps : m_downChirps));
-                const int netid2 = static_cast<int>(getLoRaSymbolVal(netIdsDec.data() + m_nbSymbols, m_settings.m_invertRamps ? m_upChirps : m_downChirps));
-                m_loRaNetIds[0] = netid1;
-                m_loRaNetIds[1] = netid2;
-                m_loRaNetIdOff = netid1;
             }
             else
             {
@@ -1151,9 +1113,7 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 // LoRa sync word is encoded across two net-ID chirps.
                 // First chirp (index 0) carries the high nibble, second (index 1) the low nibble.
                 // Each nibble N is mapped to bin N*8. Formula: syncWord = low + 16*high.
-                // Use the coarse state-machine bin values (netIdBin0/1) which are reliably
-                // set from the FFT in LoRaSyncNetId1/2 states, not the refined values which
-                // require m_loRaNetIdSamp to be fully populated.
+                // Use the bins measured in LoRaSyncNetId1/2.
                 const unsigned int hiNibble = static_cast<unsigned int>(std::round(static_cast<double>(netIdBin0) / 8.0)) & 0xFU;
                 const unsigned int loNibble = static_cast<unsigned int>(std::round(static_cast<double>(netIdBin1) / 8.0)) & 0xFU;
                 m_decodeMsg->setSyncWord(loNibble + 16U * hiNibble);
@@ -1166,7 +1126,11 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             m_waitHeaderFeedback = false;
             m_headerFeedbackWaitSteps = 0U;
             m_demodActive = true;
-            m_loRaSTOFrac += m_loRaSFOHat * 4.25f;
+            // Capture timing before drift/wrap so carry events can be correlated with CRC results.
+            const float stoBeforeDrift = m_loRaSTOFrac;
+            const float sfoDrift = m_loRaSFOHat * 4.25f;
+            m_loRaSTOFrac += sfoDrift;
+            const float stoBeforeWrap = m_loRaSTOFrac;
 
             // Guard against NaN/inf from a degenerate STO/SFO estimate: loRaRound()
             // casts float to int, which is undefined behaviour for non-finite
@@ -1194,6 +1158,12 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             const int advance = static_cast<int>(m_loRaSymbolSpan / 4U)
                 + static_cast<int>(m_osFactor) * m_loRaCFOInt
                 + stoCarry;
+
+            // One payload-entry record per frame, including ordinary non-clamped carry events.
+            qDebug("MeshtasticDemodSink::timingPayload: frameId=%u sf=%u os=%u cfoInt=%d cfoFrac=%.6f sfoHat=%.6f stoBeforeDrift=%.6f sfoDrift=%.6f stoBeforeWrap=%.6f stoChips=%d stoCarry=%d stoFrac=%.6f advance=%d appliedAdvance=%d",
+                m_loRaFrameId, static_cast<unsigned int>(m_settings.m_spreadFactor), m_osFactor,
+                m_loRaCFOInt, m_loRaCFOFrac, m_loRaSFOHat, stoBeforeDrift, sfoDrift,
+                stoBeforeWrap, stoChips, stoCarry, m_loRaSTOFrac, advance, std::max(1, advance));
 
             if (advance < 1)
             {
@@ -1247,8 +1217,10 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
     m_magsqOnAvg(magsq);
     m_loRaFrameSymbolCount++;
 
+    // Offsets 0..2 are fully available by symbol 10; later checks repeat the same data.
     if (!m_headerLocked
-        && (m_loRaFrameSymbolCount >= 8U))
+        && (m_loRaFrameSymbolCount >= 8U)
+        && (m_loRaFrameSymbolCount <= 10U))
     {
         tryHeaderLock();
     }
@@ -1358,7 +1330,6 @@ void MeshtasticDemodSink::applySettings(const MeshtasticDemodSettings& settings,
     m_loRaCFOFracCorrec.assign(m_nbSymbols, Complex{1.0f, 0.0f});
     m_loRaPayloadDownchirp.assign(m_nbSymbols, Complex{1.0f, 0.0f});
     m_loRaSymbCorr.assign(m_nbSymbols, Complex{0.0f, 0.0f});
-    m_loRaNetIdSamp.assign((m_loRaSymbolSpan * 5U) / 2U + m_loRaSymbolSpan, Complex{0.0f, 0.0f});
     m_loRaAdditionalSymbolSamp.assign(m_loRaSymbolSpan * 2U, Complex{0.0f, 0.0f});
     resetLoRaFrameSync();
 }

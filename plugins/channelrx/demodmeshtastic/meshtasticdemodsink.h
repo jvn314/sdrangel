@@ -130,7 +130,6 @@ private:
     std::vector<Complex> m_loRaCFOFracCorrec;
     std::vector<Complex> m_loRaPayloadDownchirp;
     std::vector<Complex> m_loRaSymbCorr;
-    std::vector<Complex> m_loRaNetIdSamp;
     std::vector<Complex> m_loRaAdditionalSymbolSamp;
     std::vector<int> m_loRaPreambleVals;
     std::vector<int> m_loRaNetIds;
@@ -139,7 +138,6 @@ private:
     int m_loRaKHat;
     int m_loRaDownVal;
     int m_loRaCFOInt;
-    int m_loRaNetIdOff;
     int m_loRaAdditionalUpchirps;
     int m_loRaUpSymbToUse;
     unsigned int m_loRaRequiredUpchirps;
