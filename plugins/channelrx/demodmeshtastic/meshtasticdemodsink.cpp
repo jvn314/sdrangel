@@ -409,14 +409,14 @@ void MeshtasticDemodSink::tryHeaderLock()
             m_headerLocked = true;
 
             // qDebug("[LOOPBACK][RX] header_realign frameId=%u offset=%u delta=%d", m_loRaFrameId, offset, delta);
-            qDebug("MeshtasticDemodSink::tryHeaderLock: LOCKED len=%u CR=%u CRC=%s LDRO=%s expected=%u symbols offset=%u delta=%d",
-                   packetLength, nbParityBits, hasCRC ? "on" : "off", ldro ? "on" : "off", m_expectedSymbols, offset, delta);
+            qDebug("MeshtasticDemodSink::tryHeaderLock: LOCKED len=%u CR=%u CRC=%s LDRO=%s expected=%u symbols offset=%u delta=%d frameId=%u",
+                   packetLength, nbParityBits, hasCRC ? "on" : "off", ldro ? "on" : "off", m_expectedSymbols, offset, delta, m_loRaFrameId);
             return;
         }
     }
 
     if (symbols.size() >= 10U) {
-        qDebug("MeshtasticDemodSink::tryHeaderLock: header invalid after offsets 0..%u deltas -2..2", maxOffset);
+        qDebug("MeshtasticDemodSink::tryHeaderLock: header invalid after offsets 0..%u deltas -2..2 frameId=%u", maxOffset, m_loRaFrameId);
     }
 }
 
@@ -685,7 +685,7 @@ float MeshtasticDemodSink::estimateLoRaCFOFracBernier(const Complex *samples)
     return cfoFrac;
 }
 
-float MeshtasticDemodSink::estimateLoRaSTOFrac(int *upBinResidual)
+float MeshtasticDemodSink::estimateLoRaSTOFrac(int *upBinResidual, double *peakBins)
 {
     if (m_loRaUpSymbToUse <= 0) {
         return 0.0f;
@@ -728,6 +728,11 @@ float MeshtasticDemodSink::estimateLoRaSTOFrac(int *upBinResidual)
     const double peak = (k0 + ka) / 2.0;
     const double kres = std::fmod(peak, 1.0);
     const double frac = kres - (kres > 0.5 ? 1.0 : 0.0);
+
+    // Expose the full signed peak for diagnostics without changing the fractional estimate.
+    if (peakBins) {
+        *peakBins = std::remainder(peak, static_cast<double>(m_nbSymbols));
+    }
 
     if (upBinResidual)
     {
@@ -934,7 +939,8 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             }
 
             int upBinResidual = 0;
-            m_loRaSTOFrac = estimateLoRaSTOFrac(&upBinResidual);
+            double initialPeakBins = 0.0;
+            m_loRaSTOFrac = estimateLoRaSTOFrac(&upBinResidual, &initialPeakBins);
 
             // Detection aligned on the mode of uncorrected preamble bins. After
             // fractional CFO correction, an integer upchirp-bin residual can
@@ -953,8 +959,8 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             }
 
             // Identify initial timing and the integer alignment applied to this frame.
-            qDebug("MeshtasticDemodSink::timingInitial: frameId=%u cfoFrac=%.6f stoFrac=%.6f upBinResidual=%d pendingShift=%d",
-                m_loRaFrameId + 1U, m_loRaCFOFrac, m_loRaSTOFrac, upBinResidual, m_loRaPendingShift);
+            qDebug("MeshtasticDemodSink::timingInitial: frameId=%u cfoFrac=%.6f stoFrac=%.6f upBinResidual=%d pendingShift=%d peakBins=%.6f",
+                m_loRaFrameId + 1U, m_loRaCFOFrac, m_loRaSTOFrac, upBinResidual, m_loRaPendingShift, initialPeakBins);
             m_loRaCFOSTOEstimated = true;
         }
 
@@ -1079,14 +1085,16 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                     m_loRaPreambleUpchirps[n] *= sfoCorrec[n];
                 }
 
-                const float tmpSto = estimateLoRaSTOFrac();
+                // Retain the full refined peak in the log to expose integer/fractional ambiguity.
+                double refinedPeakBins = 0.0;
+                const float tmpSto = estimateLoRaSTOFrac(nullptr, &refinedPeakBins);
                 const float diffSto = m_loRaSTOFrac - tmpSto;
 
                 // Record refinement decisions without changing the existing acceptance rule.
                 const bool stoAccepted = std::abs(diffSto)
                     <= (static_cast<float>(m_osFactor) - 1.0f) / static_cast<float>(m_osFactor);
-                qDebug("MeshtasticDemodSink::timingRefinement: frameId=%u oldSto=%.6f newSto=%.6f diffSto=%.6f accepted=%d corrLen=%u",
-                    m_loRaFrameId + 1U, m_loRaSTOFrac, tmpSto, diffSto, stoAccepted ? 1 : 0, corrLen);
+                qDebug("MeshtasticDemodSink::timingRefinement: frameId=%u oldSto=%.6f newSto=%.6f diffSto=%.6f accepted=%d corrLen=%u peakBins=%.6f",
+                    m_loRaFrameId + 1U, m_loRaSTOFrac, tmpSto, diffSto, stoAccepted ? 1 : 0, corrLen, refinedPeakBins);
                 if (stoAccepted) {
                     m_loRaSTOFrac = tmpSto;
                 }

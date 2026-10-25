@@ -193,7 +193,7 @@ private:
         bool publishSpectrum = false
     );
     float estimateLoRaCFOFracBernier(const Complex *samples);
-    float estimateLoRaSTOFrac(int *upBinResidual = nullptr);
+    float estimateLoRaSTOFrac(int *upBinResidual = nullptr, double *peakBins = nullptr);
     void buildLoRaPayloadDownchirp();
     void finalizeLoRaFrame();
 };
