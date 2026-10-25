@@ -397,6 +397,8 @@ void MeshtasticDemodSink::tryHeaderLock()
                 continue;
             }
 
+            // Capture the arrival count before dropping any leading symbol offset.
+            const unsigned int symbolsAtLock = m_loRaFrameSymbolCount;
             if (offset > 0U)
             {
                 m_decodeMsg->dropFront(offset);
@@ -409,8 +411,8 @@ void MeshtasticDemodSink::tryHeaderLock()
             m_headerLocked = true;
 
             // qDebug("[LOOPBACK][RX] header_realign frameId=%u offset=%u delta=%d", m_loRaFrameId, offset, delta);
-            qDebug("MeshtasticDemodSink::tryHeaderLock: LOCKED len=%u CR=%u CRC=%s LDRO=%s expected=%u symbols offset=%u delta=%d frameId=%u",
-                   packetLength, nbParityBits, hasCRC ? "on" : "off", ldro ? "on" : "off", m_expectedSymbols, offset, delta, m_loRaFrameId);
+            qDebug("MeshtasticDemodSink::tryHeaderLock: LOCKED len=%u CR=%u CRC=%s LDRO=%s expected=%u symbols offset=%u delta=%d frameId=%u symbolsAtLock=%u",
+                   packetLength, nbParityBits, hasCRC ? "on" : "off", ldro ? "on" : "off", m_expectedSymbols, offset, delta, m_loRaFrameId, symbolsAtLock);
             return;
         }
     }
@@ -1102,15 +1104,27 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 const int candidateStoShift = newStoFinite
                     ? loRaRound(tmpSto * static_cast<float>(m_osFactor)) : 0;
                 const int appliedStoShift = stoAccepted ? candidateStoShift : oldStoShift;
-                const int oldRead0 = std::max(0, std::min(static_cast<int>(m_osCenterPhase) - oldStoShift,
+                // Log unclamped endpoints too: either end can fall outside the symbol window.
+                const int oldRead0Unclamped = static_cast<int>(m_osCenterPhase) - oldStoShift;
+                const int candidateRead0Unclamped = static_cast<int>(m_osCenterPhase) - candidateStoShift;
+                const int lastSampleOffset = static_cast<int>(m_osFactor * (m_nbSymbols - 1U));
+                const int oldReadLastUnclamped = oldRead0Unclamped + lastSampleOffset;
+                const int candidateReadLastUnclamped = candidateRead0Unclamped + lastSampleOffset;
+                const bool oldReadClamped = oldRead0Unclamped < 0
+                    || oldReadLastUnclamped >= static_cast<int>(m_loRaSymbolSpan);
+                const bool candidateReadClamped = candidateRead0Unclamped < 0
+                    || candidateReadLastUnclamped >= static_cast<int>(m_loRaSymbolSpan);
+                const int oldRead0 = std::max(0, std::min(oldRead0Unclamped,
                     static_cast<int>(m_loRaSymbolSpan) - 1));
-                const int candidateRead0 = std::max(0, std::min(static_cast<int>(m_osCenterPhase) - candidateStoShift,
+                const int candidateRead0 = std::max(0, std::min(candidateRead0Unclamped,
                     static_cast<int>(m_loRaSymbolSpan) - 1));
-                qDebug("MeshtasticDemodSink::timingRefinement: frameId=%u oldSto=%.6f newSto=%.6f diffSto=%.6f accepted=%d corrLen=%u peakBins=%.6f oldStoFinite=%d newStoFinite=%d oldStoShift=%d candidateStoShift=%d appliedStoShift=%d oldRead0=%d candidateRead0=%d appliedRead0=%d sampleCenter=%u os=%u cfoInt=%d preambleRotateDown=%d",
+                qDebug("MeshtasticDemodSink::timingRefinement: frameId=%u oldSto=%.6f newSto=%.6f diffSto=%.6f accepted=%d corrLen=%u peakBins=%.6f oldStoFinite=%d newStoFinite=%d oldStoShift=%d candidateStoShift=%d appliedStoShift=%d oldRead0=%d candidateRead0=%d appliedRead0=%d sampleCenter=%u os=%u cfoInt=%d preambleRotateDown=%d oldRead0Unclamped=%d candidateRead0Unclamped=%d oldReadLastUnclamped=%d candidateReadLastUnclamped=%d oldReadClamped=%d candidateReadClamped=%d",
                     m_loRaFrameId + 1U, m_loRaSTOFrac, tmpSto, diffSto, stoAccepted ? 1 : 0, corrLen, refinedPeakBins,
                     oldStoFinite ? 1 : 0, newStoFinite ? 1 : 0, oldStoShift, candidateStoShift, appliedStoShift,
                     oldRead0, candidateRead0, stoAccepted ? candidateRead0 : oldRead0,
-                    m_osCenterPhase, m_osFactor, m_loRaCFOInt, cfoIntMod);
+                    m_osCenterPhase, m_osFactor, m_loRaCFOInt, cfoIntMod,
+                    oldRead0Unclamped, candidateRead0Unclamped, oldReadLastUnclamped, candidateReadLastUnclamped,
+                    oldReadClamped ? 1 : 0, candidateReadClamped ? 1 : 0);
                 if (stoAccepted) {
                     m_loRaSTOFrac = tmpSto;
                 }
@@ -1184,15 +1198,22 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 + static_cast<int>(m_osFactor) * m_loRaCFOInt
                 + stoCarry;
 
+            // Distinguish sample-index clamping from the separate FIFO-advance clamp.
+            const int read0Unclamped = static_cast<int>(m_osCenterPhase) - static_cast<int>(stoQuant);
+            const int readLastUnclamped = read0Unclamped
+                + static_cast<int>(m_osFactor * (m_nbSymbols - 1U));
+            const bool readClamped = read0Unclamped < 0
+                || readLastUnclamped >= static_cast<int>(m_loRaSymbolSpan);
             // One payload-entry record per frame, including ordinary non-clamped carry events.
-            qDebug("MeshtasticDemodSink::timingPayload: frameId=%u sf=%u os=%u cfoInt=%d cfoFrac=%.6f sfoHat=%.6f stoBeforeDrift=%.6f sfoDrift=%.6f stoBeforeWrap=%.6f stoChips=%d stoCarry=%d stoFrac=%.6f advance=%d appliedAdvance=%d stoShift=%d sampleCenter=%u read0=%d quarterAdvance=%u cfoAdvance=%d",
+            qDebug("MeshtasticDemodSink::timingPayload: frameId=%u sf=%u os=%u cfoInt=%d cfoFrac=%.6f sfoHat=%.6f stoBeforeDrift=%.6f sfoDrift=%.6f stoBeforeWrap=%.6f stoChips=%d stoCarry=%d stoFrac=%.6f advance=%d appliedAdvance=%d stoShift=%d sampleCenter=%u read0=%d quarterAdvance=%u cfoAdvance=%d read0Unclamped=%d readLastUnclamped=%d readClamped=%d",
                 m_loRaFrameId, static_cast<unsigned int>(m_settings.m_spreadFactor), m_osFactor,
                 m_loRaCFOInt, m_loRaCFOFrac, m_loRaSFOHat, stoBeforeDrift, sfoDrift,
                 stoBeforeWrap, stoChips, stoCarry, m_loRaSTOFrac, advance, std::max(1, advance),
                 static_cast<int>(stoQuant), m_osCenterPhase,
                 std::max(0, std::min(static_cast<int>(m_osCenterPhase) - static_cast<int>(stoQuant),
                     static_cast<int>(m_loRaSymbolSpan) - 1)),
-                m_loRaSymbolSpan / 4U, static_cast<int>(m_osFactor) * m_loRaCFOInt);
+                m_loRaSymbolSpan / 4U, static_cast<int>(m_osFactor) * m_loRaCFOInt,
+                read0Unclamped, readLastUnclamped, readClamped ? 1 : 0);
 
             if (advance < 1)
             {
