@@ -242,6 +242,15 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             m_payloadCRCStatus = s.payloadCRCStatus;
         };
 
+        // Record each existing attempt before state restoration can hide its outcome.
+        auto logLoRaAttempt = [&msg](const char *path, int delta, const LoRaDecodeState& state) {
+            qDebug("MeshtasticDemodDecoder::decodeAttempt: frameId=%u path=%s delta=%d symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hasCRC=%d length=%u cr=%u decoderExpectedSymbols=%u",
+                msg.getFrameId(), path, delta, msg.getSymbols().size(),
+                static_cast<long long>(state.bytes.size()), state.earlyEOM ? 1 : 0,
+                state.headerCRCStatus ? 1 : 0, state.payloadCRCStatus ? 1 : 0,
+                state.hasCRC ? 1 : 0, state.packetLength, state.nbParityBits, state.nbSymbols);
+        };
+
         if (canSoftDecode)
         {
             unsigned int headerNbSymbolBits;
@@ -283,6 +292,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
             );
 
             const LoRaDecodeState softState = captureLoRaState(msgBytes);
+            logLoRaAttempt("soft", 0, softState);
 
             // Soft path is canonical for gr-lora_sdr, but if this approximation misses CRC
             // on noisy captures, retry hard decode once and keep whichever path validates.
@@ -292,6 +302,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 QByteArray hardBytes;
                 decodeSymbols(msg.getSymbols(), hardBytes); // hard path updates decoder state
                 const LoRaDecodeState hardState = captureLoRaState(hardBytes);
+                logLoRaAttempt("hardUnshifted", 0, hardState);
 
                 if (hardState.payloadCRCStatus) {
                     decodePath = "hardFallback";
@@ -304,6 +315,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         else
         {
             decodeSymbols(msg.getSymbols(), msgBytes);
+            logLoRaAttempt("hardUnshifted", 0, captureLoRaState(msgBytes));
         }
 
         // Preserve the unshifted result for comparison with recovery and the sink's header lock.
@@ -337,6 +349,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
                 QByteArray shiftedBytes;
                 decodeSymbols(shifted, shiftedBytes); // hard-path decode with adjusted symbol indices
                 const LoRaDecodeState shiftedState = captureLoRaState(shiftedBytes);
+                logLoRaAttempt("shiftedHard", delta, shiftedState);
 
                 if (shiftedState.payloadCRCStatus)
                 {
@@ -356,7 +369,7 @@ bool MeshtasticDemodDecoder::handleMessage(const Message& cmd)
         // Use the same signal/noise estimates carried to packet reports, including failed frames.
         const float msgSnrDb = msgSignalDb - msgNoiseDb;
         qDebug(
-            "MeshtasticDemodDecoder::handleMessage: decode frameId=%u symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d signalDb=%.2f noiseDb=%.2f snrDb=%.2f path=%s hardFallbackTried=%d recoveryAttempts=%u recoveryDelta=%d unshiftedLength=%u unshiftedHCRC=%d unshiftedPCRC=%d length=%u hasCRC=%d cr=%u expectedSymbols=%u",
+            "MeshtasticDemodDecoder::handleMessage: decode frameId=%u symbols=%zu bytes=%lld earlyEOM=%d hCRC=%d pCRC=%d hParity=%d pParity=%d signalDb=%.2f noiseDb=%.2f snrDb=%.2f path=%s hardFallbackTried=%d recoveryAttempts=%u recoveryDelta=%d unshiftedLength=%u unshiftedHCRC=%d unshiftedPCRC=%d length=%u hasCRC=%d cr=%u decoderExpectedSymbols=%u",
             msg.getFrameId(),
             msg.getSymbols().size(),
             static_cast<long long>(msgBytes.size()),

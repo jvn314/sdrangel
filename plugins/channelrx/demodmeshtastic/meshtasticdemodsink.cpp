@@ -959,8 +959,9 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
             }
 
             // Identify initial timing and the integer alignment applied to this frame.
-            qDebug("MeshtasticDemodSink::timingInitial: frameId=%u cfoFrac=%.6f stoFrac=%.6f upBinResidual=%d pendingShift=%d peakBins=%.6f",
-                m_loRaFrameId + 1U, m_loRaCFOFrac, m_loRaSTOFrac, upBinResidual, m_loRaPendingShift, initialPeakBins);
+            qDebug("MeshtasticDemodSink::timingInitial: frameId=%u cfoFrac=%.6f stoFrac=%.6f upBinResidual=%d pendingShift=%d peakBins=%.6f preambleStartDown=%d detectBin=%d sampleCenter=%u os=%u",
+                m_loRaFrameId + 1U, m_loRaCFOFrac, m_loRaSTOFrac, upBinResidual, m_loRaPendingShift, initialPeakBins,
+                cfoStart, m_loRaKHat, m_osCenterPhase, m_osFactor);
             m_loRaCFOSTOEstimated = true;
         }
 
@@ -1093,8 +1094,23 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 // Record refinement decisions without changing the existing acceptance rule.
                 const bool stoAccepted = std::abs(diffSto)
                     <= (static_cast<float>(m_osFactor) - 1.0f) / static_cast<float>(m_osFactor);
-                qDebug("MeshtasticDemodSink::timingRefinement: frameId=%u oldSto=%.6f newSto=%.6f diffSto=%.6f accepted=%d corrLen=%u peakBins=%.6f",
-                    m_loRaFrameId + 1U, m_loRaSTOFrac, tmpSto, diffSto, stoAccepted ? 1 : 0, corrLen, refinedPeakBins);
+                // Sample shifts are relative to the FIFO head; buffer rotation uses downsampled samples.
+                const bool oldStoFinite = std::isfinite(m_loRaSTOFrac);
+                const bool newStoFinite = std::isfinite(tmpSto);
+                const int oldStoShift = oldStoFinite
+                    ? loRaRound(m_loRaSTOFrac * static_cast<float>(m_osFactor)) : 0;
+                const int candidateStoShift = newStoFinite
+                    ? loRaRound(tmpSto * static_cast<float>(m_osFactor)) : 0;
+                const int appliedStoShift = stoAccepted ? candidateStoShift : oldStoShift;
+                const int oldRead0 = std::max(0, std::min(static_cast<int>(m_osCenterPhase) - oldStoShift,
+                    static_cast<int>(m_loRaSymbolSpan) - 1));
+                const int candidateRead0 = std::max(0, std::min(static_cast<int>(m_osCenterPhase) - candidateStoShift,
+                    static_cast<int>(m_loRaSymbolSpan) - 1));
+                qDebug("MeshtasticDemodSink::timingRefinement: frameId=%u oldSto=%.6f newSto=%.6f diffSto=%.6f accepted=%d corrLen=%u peakBins=%.6f oldStoFinite=%d newStoFinite=%d oldStoShift=%d candidateStoShift=%d appliedStoShift=%d oldRead0=%d candidateRead0=%d appliedRead0=%d sampleCenter=%u os=%u cfoInt=%d preambleRotateDown=%d",
+                    m_loRaFrameId + 1U, m_loRaSTOFrac, tmpSto, diffSto, stoAccepted ? 1 : 0, corrLen, refinedPeakBins,
+                    oldStoFinite ? 1 : 0, newStoFinite ? 1 : 0, oldStoShift, candidateStoShift, appliedStoShift,
+                    oldRead0, candidateRead0, stoAccepted ? candidateRead0 : oldRead0,
+                    m_osCenterPhase, m_osFactor, m_loRaCFOInt, cfoIntMod);
                 if (stoAccepted) {
                     m_loRaSTOFrac = tmpSto;
                 }
@@ -1169,10 +1185,14 @@ int MeshtasticDemodSink::processLoRaFrameSyncStep()
                 + stoCarry;
 
             // One payload-entry record per frame, including ordinary non-clamped carry events.
-            qDebug("MeshtasticDemodSink::timingPayload: frameId=%u sf=%u os=%u cfoInt=%d cfoFrac=%.6f sfoHat=%.6f stoBeforeDrift=%.6f sfoDrift=%.6f stoBeforeWrap=%.6f stoChips=%d stoCarry=%d stoFrac=%.6f advance=%d appliedAdvance=%d",
+            qDebug("MeshtasticDemodSink::timingPayload: frameId=%u sf=%u os=%u cfoInt=%d cfoFrac=%.6f sfoHat=%.6f stoBeforeDrift=%.6f sfoDrift=%.6f stoBeforeWrap=%.6f stoChips=%d stoCarry=%d stoFrac=%.6f advance=%d appliedAdvance=%d stoShift=%d sampleCenter=%u read0=%d quarterAdvance=%u cfoAdvance=%d",
                 m_loRaFrameId, static_cast<unsigned int>(m_settings.m_spreadFactor), m_osFactor,
                 m_loRaCFOInt, m_loRaCFOFrac, m_loRaSFOHat, stoBeforeDrift, sfoDrift,
-                stoBeforeWrap, stoChips, stoCarry, m_loRaSTOFrac, advance, std::max(1, advance));
+                stoBeforeWrap, stoChips, stoCarry, m_loRaSTOFrac, advance, std::max(1, advance),
+                static_cast<int>(stoQuant), m_osCenterPhase,
+                std::max(0, std::min(static_cast<int>(m_osCenterPhase) - static_cast<int>(stoQuant),
+                    static_cast<int>(m_loRaSymbolSpan) - 1)),
+                m_loRaSymbolSpan / 4U, static_cast<int>(m_osFactor) * m_loRaCFOInt);
 
             if (advance < 1)
             {
